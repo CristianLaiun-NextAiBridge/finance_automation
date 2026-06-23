@@ -197,6 +197,24 @@ function formatearHoja() {
     ledger.setConditionalFormatRules(existingRules);
   }
 
+  // ── 6. COLUMNA COMMENTS: COLOR CELESTE + ÚNICA EDITABLE ─────────────────────
+  const commentsCol = ledgerHeaders.indexOf('Comments') + 1;
+  if (commentsCol > 0) {
+    // Pintar toda la columna de celeste clarito (datos + header diferenciado)
+    ledger.getRange(1, commentsCol).setBackground('#89c4e1');            // header celeste medio
+    if (lastRow > 1) {
+      ledger.getRange(2, commentsCol, ledger.getMaxRows() - 1, 1).setBackground('#d1ecf1'); // celeste claro
+    }
+
+    // Proteger la hoja completa dejando solo Comments editable
+    ledger.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach(function(p) { p.remove(); });
+
+    const protection = ledger.protect().setDescription('Ledger — solo editable la columna Comments');
+    // setUnprotectedRanges define qué celdas SÍ pueden editar los usuarios
+    const commentsEditable = ledger.getRange(2, commentsCol, ledger.getMaxRows() - 1, 1);
+    protection.setUnprotectedRanges([commentsEditable]);
+  }
+
   Logger.log('✅ Formateo del Ledger completado.');
 }
 
