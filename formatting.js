@@ -128,6 +128,10 @@ function formatearHoja() {
 
   if (categorias.length > 0) {
     Logger.log("📋 Categorías encontradas: " + categorias.join(', '));
+
+    // Aplicar dropdown a toda la columna assigned_category
+    _aplicarDropdownCategorias(targetSheet, assignedCategoryCol, categorias);
+
     const sa    = getServiceAccount();
     const token = obtenerTokenDeAcceso(sa);
     _asignarCategoriasIA(targetSheet, headers, assignedCategoryCol, categorias, sa, token);
@@ -170,12 +174,26 @@ function asignarCategorias() {
 
   Logger.log("📋 Categorías encontradas: " + categorias.join(', '));
 
+  _aplicarDropdownCategorias(targetSheet, assignedCatCol, categorias);
+
   const sa    = getServiceAccount();
   const token = obtenerTokenDeAcceso(sa);
   _asignarCategoriasIA(targetSheet, headers, assignedCatCol, categorias, sa, token);
 }
 
 // ── HELPERS INTERNOS ─────────────────────────────────────────────────────────
+
+function _aplicarDropdownCategorias(sheet, col, categorias) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+
+  const rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(categorias, true)  // true = mostrar dropdown
+    .setAllowInvalid(true)                 // permite escribir valores no listados
+    .build();
+
+  sheet.getRange(2, col, lastRow - 1, 1).setDataValidation(rule);
+}
 
 function _leerCategorias(spreadsheet) {
   // Busca la hoja con nombre exacto o insensible a mayúsculas
