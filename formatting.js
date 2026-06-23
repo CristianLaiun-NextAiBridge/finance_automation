@@ -1,224 +1,238 @@
 // ==========================================
-// FORMATEO Y PREPARACIÓN DE LA HOJA DE CONCILIACIÓN
+// FORMATEO DE LA HOJA LEDGER
 //
-// Se encarga de tres cosas en orden:
+// Lee los datos raw de la pestaña "mercury" y los transforma al escribirlos
+// en la pestaña "Ledger", aplicando:
 //
-// 1. SINCRONIZACIÓN DE FILAS: copia las transacciones nuevas del sheet raw de
-//    Mercury (MERCURY_SOURCE_SHEET_ID) a la hoja activa, omitiendo las que ya
-//    existen (detección por id o por fecha+monto+descripción).
+// - Columnas del Ledger: Date (UTC), Description, Amount In (+), Amount Out (-),
+//   Balance, Status  [+ comprobante, JSON Data, assigned_category, comments]
+// - Description: unificación de Description + Bank Description + Reference + Note,
+//   eliminando duplicados y separando con " | "
+// - Amount: dividido en Amount In (+) para créditos y Amount Out (-) para débitos
+// - Timestamp, Bank Description, Reference, Note y columnas técnicas: excluidas
+// - Formato visual: header azul, fila fija, filtro
 //
-// 2. GESTIÓN DE COLUMNAS:
-//    - "comprobante" y "JSON Data": usadas por invoice_matching.js
-//    - "assigned_category": la IA asigna automáticamente una categoría tomando
-//      como referencia la lista de la hoja "setup" del mismo archivo.
-//      Solo se procesa si la celda está vacía.
-//    - "comments": columna libre para anotaciones manuales de los usuarios.
-//      Nunca se sobreescribe si ya tiene contenido.
-//
-// 3. FORMATO VISUAL: header azul, fila fija, filtro, y ocultamiento de columnas
-//    técnicas para mantener la vista limpia.
+// asignarCategorias() es una función INDEPENDIENTE — no se llama desde aquí.
 // ==========================================
 
+// Columnas base del Ledger (sin las columnas de gestión que se agregan después)
+const LEDGER_BASE_HEADERS = [
+  'Date (UTC)', 'Description', 'Amount In (+)', 'Amount Out (-)', 'Balance', 'Status'
+];
+
 function formatearHoja() {
-  Logger.log("🎨 Iniciando formateo y sincronización de la hoja...");
+  Logger.log("🎨 Iniciando formateo del Ledger...");
 
   const spreadsheet = SpreadsheetApp.openById(CONCILIATION_SHEET_ID);
-  const targetSheet = spreadsheet.getSheetByName(LEDGER_TAB_NAME);
+  const ledger      = spreadsheet.getSheetByName(LEDGER_TAB_NAME);
 
-  // ── 1. SINCRONIZAR FILAS NUEVAS DESDE MERCURY ───────────────────────────────
-  let currentData = targetSheet.getLastRow() > 0 ? targetSheet.getDataRange().getValues() : [];
-  let headers     = currentData.length > 0 ? currentData[0] : [];
-
-  const existingTxIds    = new Set();
-  const currentIdIdx     = headers.indexOf('id');
-  const currentDateIdx   = headers.indexOf('Date (UTC)');
-  const currentAmtInIdx  = headers.indexOf('Amount In (+)');
-  const currentAmtOutIdx = headers.indexOf('Amount Out (-)');
-  const currentDescIdx   = headers.indexOf('Description');
-
-  for (let r = 1; r < currentData.length; r++) {
-    if (currentIdIdx !== -1 && currentData[r][currentIdIdx]) {
-      existingTxIds.add(currentData[r][currentIdIdx].toString().trim());
-    } else if (currentDateIdx !== -1) {
-      let dateVal = currentData[r][currentDateIdx];
-      if (dateVal instanceof Date) dateVal = Utilities.formatDate(dateVal, Session.getScriptTimeZone(), "yyyy-MM-dd");
-      const rawAmt  = currentData[r][currentAmtInIdx] || currentData[r][currentAmtOutIdx] || 0;
-      const amtVal  = Math.abs(parseFloat(rawAmt.toString())).toFixed(2);
-      const descVal = (currentData[r][currentDescIdx] || '').toString().toLowerCase().trim();
-      existingTxIds.add(dateVal + '_' + amtVal + '_' + descVal);
-    }
-  }
-
-  let sourceData = [];
-  try {
-    const mercuryTab = SpreadsheetApp.openById(CONCILIATION_SHEET_ID).getSheetByName(MERCURY_TAB_NAME);
-    if (!mercuryTab) {
-      Logger.log('❌ No existe la pestaña "' + MERCURY_TAB_NAME + '". Ejecutá actualizarTablaMercury() primero.');
-      return;
-    }
-    sourceData = mercuryTab.getDataRange().getValues();
-  } catch(e) {
-    Logger.log("❌ Error leyendo la pestaña mercury: " + e.toString());
+  if (!ledger) {
+    Logger.log('❌ No existe la pestaña "' + LEDGER_TAB_NAME + '".');
     return;
   }
 
-  const sourceHeaders   = sourceData[0];
-  const sourceIdIdx     = sourceHeaders.indexOf('id');
-  const amountInIdx     = sourceHeaders.indexOf('Amount In (+)');
-  const amountOutIdx    = sourceHeaders.indexOf('Amount Out (-)');
-  let   dateIdx         = sourceHeaders.indexOf('Date (UTC)');
-  const descIdx         = sourceHeaders.indexOf('Description');
-
-  if (sourceIdIdx === -1 || dateIdx === -1) {
-    Logger.log("❌ El sheet fuente no tiene el formato esperado.");
+  const mercuryTab = spreadsheet.getSheetByName(MERCURY_TAB_NAME);
+  if (!mercuryTab) {
+    Logger.log('❌ No existe la pestaña "' + MERCURY_TAB_NAME + '". Ejecutá actualizarTablaMercury() primero.');
     return;
   }
 
-  const indicesAOmitir = COLUMNAS_A_SACAR.map(col => sourceHeaders.indexOf(col)).filter(idx => idx !== -1);
+  const srcData    = mercuryTab.getDataRange().getValues();
+  const srcHeaders = srcData[0];
 
-  if (headers.length === 0) {
-    headers = sourceHeaders.filter(function(_, idx) { return !indicesAOmitir.includes(idx); });
-    targetSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  // Índices en la pestaña mercury
+  const SI = {
+    id:          srcHeaders.indexOf('id'),
+    date:        srcHeaders.indexOf('Date (UTC)'),
+    description: srcHeaders.indexOf('Description'),
+    bankDesc:    srcHeaders.indexOf('Bank Description'),
+    reference:   srcHeaders.indexOf('Reference'),
+    note:        srcHeaders.indexOf('Note'),
+    amount:      srcHeaders.indexOf('Amount'),
+    balance:     srcHeaders.indexOf('Balance'),
+    status:      srcHeaders.indexOf('Status')
+  };
+
+  // ── 1. INICIALIZAR HEADERS DEL LEDGER SI ESTÁ VACÍO ─────────────────────────
+  if (ledger.getLastRow() === 0) {
+    ledger.getRange(1, 1, 1, LEDGER_BASE_HEADERS.length).setValues([LEDGER_BASE_HEADERS]);
   }
 
-  const nuevasFilas = [];
-  for (let s = 1; s < sourceData.length; s++) {
-    const row    = sourceData[s];
-    const txId   = row[sourceIdIdx];
-    let   txDate = row[dateIdx];
-    if (txDate instanceof Date) txDate = Utilities.formatDate(txDate, Session.getScriptTimeZone(), "yyyy-MM-dd");
-    // Tomar el monto de cualquiera de las dos columnas para la clave de deduplicación
-    const rawAmount = row[amountInIdx] || row[amountOutIdx] || 0;
-    const txAmount  = Math.abs(parseFloat(rawAmount.toString())).toFixed(2);
-    const txDesc    = (row[descIdx] || '').toString().toLowerCase().trim();
-    const compKey   = txDate + '_' + txAmount + '_' + txDesc;
+  // ── 2. LEER ESTADO ACTUAL DEL LEDGER ────────────────────────────────────────
+  let ledgerHeaders = ledger.getRange(1, 1, 1, ledger.getLastColumn()).getValues()[0];
 
-    if ((txId && existingTxIds.has(txId.toString().trim())) || existingTxIds.has(compKey)) continue;
-
-    const nuevaFila = new Array(headers.length).fill("");
-    let t = 0;
-    for (let c = 0; c < row.length; c++) {
-      if (!indicesAOmitir.includes(c)) { nuevaFila[t] = row[c]; t++; }
-    }
-    nuevasFilas.push(nuevaFila);
-  }
-
-  if (nuevasFilas.length > 0) {
-    targetSheet.getRange(targetSheet.getLastRow() + 1, 1, nuevasFilas.length, nuevasFilas[0].length).setValues(nuevasFilas);
-    Logger.log("📥 " + nuevasFilas.length + " filas nuevas agregadas.");
-  } else {
-    Logger.log("ℹ️ Sin transacciones nuevas.");
-  }
-
-  // ── 2. GESTIÓN DE COLUMNAS ───────────────────────────────────────────────────
-  // Re-leer headers después de posibles cambios
-  headers = targetSheet.getRange(1, 1, 1, targetSheet.getLastColumn()).getValues()[0];
-
+  // Asegurar columnas de gestión
   function ensureColumn(name) {
-    let col = headers.indexOf(name) + 1;
+    let col = ledgerHeaders.indexOf(name) + 1;
     if (col === 0) {
-      col = targetSheet.getLastColumn() + 1;
-      targetSheet.getRange(1, col).setValue(name).setFontWeight("bold");
-      headers.push(name);
+      col = ledger.getLastColumn() + 1;
+      ledger.getRange(1, col).setValue(name).setFontWeight('bold');
+      ledgerHeaders.push(name);
     }
     return col;
   }
 
-  const comprobanteCol      = ensureColumn('comprobante');
-  const jsonDataCol         = ensureColumn('JSON Data');
-  const assignedCategoryCol = ensureColumn('assigned_category');
-  const commentsCol         = ensureColumn('comments');
+  ensureColumn('comprobante');
+  ensureColumn('JSON Data');
+  ensureColumn('assigned_category');
+  ensureColumn('comments');
 
-  // ── 3. ASIGNAR CATEGORÍAS CON IA ─────────────────────────────────────────────
-  // Lee la lista de categorías desde la hoja "setup" del mismo archivo.
-  // Solo procesa filas con la celda assigned_category vacía.
-  const categorias = _leerCategorias(spreadsheet);
-
-  if (categorias.length > 0) {
-    Logger.log("📋 Categorías encontradas: " + categorias.join(', '));
-
-    // Aplicar dropdown a toda la columna assigned_category
-    _aplicarDropdownCategorias(targetSheet, assignedCategoryCol, categorias);
-
-    const sa    = getServiceAccount();
-    const token = obtenerTokenDeAcceso(sa);
-    _asignarCategoriasIA(targetSheet, headers, assignedCategoryCol, categorias, sa, token);
-  } else {
-    Logger.log("⚠️ No se encontraron categorías en la hoja 'setup'. Se omite asignación.");
+  // Dropdown de categorías en assigned_category (si la hoja setup existe)
+  const setupTab = spreadsheet.getSheetByName(SETUP_TAB_NAME);
+  if (setupTab) {
+    const categorias = _leerCategorias(setupTab);
+    if (categorias.length > 0) {
+      const assignedCol = ledgerHeaders.indexOf('assigned_category') + 1;
+      _aplicarDropdownCategorias(ledger, assignedCol, categorias);
+    }
   }
 
-  // ── 4. FORMATO VISUAL ────────────────────────────────────────────────────────
-  const lastCol     = targetSheet.getLastColumn();
-  const headerRange = targetSheet.getRange(1, 1, 1, lastCol);
+  // ── 3. CONSTRUIR SET DE IDs YA EN LEDGER (deduplicación) ────────────────────
+  const existingKeys = new Set();
+  const ledgerDateIdx   = ledgerHeaders.indexOf('Date (UTC)');
+  const ledgerAmtInIdx  = ledgerHeaders.indexOf('Amount In (+)');
+  const ledgerAmtOutIdx = ledgerHeaders.indexOf('Amount Out (-)');
+  const ledgerDescIdx   = ledgerHeaders.indexOf('Description');
 
-  headerRange.setBackground("#4a86e8").setFontColor("#ffffff").setFontWeight("bold");
-  targetSheet.setFrozenRows(1);
-  if (!targetSheet.getFilter()) headerRange.createFilter();
+  if (ledger.getLastRow() > 1) {
+    const ledgerData = ledger.getRange(2, 1, ledger.getLastRow() - 1, ledgerHeaders.length).getValues();
+    ledgerData.forEach(function(row) {
+      let date = row[ledgerDateIdx];
+      if (date instanceof Date) date = Utilities.formatDate(date, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      const amt  = row[ledgerAmtInIdx] || row[ledgerAmtOutIdx] || 0;
+      const desc = (row[ledgerDescIdx] || '').toString().toLowerCase().trim();
+      existingKeys.add(date + '|' + Math.abs(parseFloat(amt)).toFixed(2) + '|' + desc);
+    });
+  }
 
-  Logger.log("✅ Formateo completado.");
+  // ── 4. TRANSFORMAR Y AGREGAR FILAS NUEVAS ───────────────────────────────────
+  const nuevasFilas = [];
+
+  for (let s = 1; s < srcData.length; s++) {
+    const row = srcData[s];
+
+    // Construir descripción unificada
+    const descParts = [
+      (row[SI.description] || '').toString().trim(),
+      (row[SI.bankDesc]    || '').toString().trim(),
+      (row[SI.reference]   || '').toString().trim(),
+      (row[SI.note]        || '').toString().trim()
+    ].filter(Boolean);
+    const seen = new Set();
+    const description = descParts.filter(function(p) {
+      const k = p.toLowerCase();
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    }).join(' | ') || 'Sin detalles';
+
+    // Monto dividido
+    const rawAmount = parseFloat((row[SI.amount] || 0).toString().replace(/,/g, ''));
+    const amountIn  = rawAmount > 0 ? rawAmount        : '';
+    const amountOut = rawAmount < 0 ? Math.abs(rawAmount) : '';
+
+    let date = row[SI.date];
+    if (date instanceof Date) date = Utilities.formatDate(date, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+
+    const amt    = amountIn || amountOut || 0;
+    const clave  = date + '|' + Math.abs(parseFloat(amt)).toFixed(2) + '|' + description.toLowerCase().trim();
+
+    if (existingKeys.has(clave)) continue;
+
+    // Construir fila del Ledger (rellena con '' las columnas de gestión)
+    const fila = new Array(ledgerHeaders.length).fill('');
+    fila[ledgerHeaders.indexOf('Date (UTC)')]    = date;
+    fila[ledgerHeaders.indexOf('Description')]   = description;
+    fila[ledgerHeaders.indexOf('Amount In (+)')] = amountIn;
+    fila[ledgerHeaders.indexOf('Amount Out (-)')] = amountOut;
+    fila[ledgerHeaders.indexOf('Balance')]        = row[SI.balance];
+    fila[ledgerHeaders.indexOf('Status')]         = row[SI.status] || '';
+
+    nuevasFilas.push(fila);
+    existingKeys.add(clave);
+  }
+
+  if (nuevasFilas.length > 0) {
+    ledger.getRange(ledger.getLastRow() + 1, 1, nuevasFilas.length, ledgerHeaders.length).setValues(nuevasFilas);
+    Logger.log('📥 ' + nuevasFilas.length + ' filas nuevas agregadas al Ledger.');
+  } else {
+    Logger.log('ℹ️ Sin transacciones nuevas para el Ledger.');
+  }
+
+  // ── 5. FORMATO VISUAL ────────────────────────────────────────────────────────
+  const lastCol     = ledger.getLastColumn();
+  const headerRange = ledger.getRange(1, 1, 1, lastCol);
+  headerRange.setBackground('#4a86e8').setFontColor('#ffffff').setFontWeight('bold');
+  ledger.setFrozenRows(1);
+  if (!ledger.getFilter()) headerRange.createFilter();
+
+  Logger.log('✅ Formateo del Ledger completado.');
 }
 
-// ── FUNCIÓN STANDALONE: se puede ejecutar sola o es llamada por formatearHoja() ──
 
-// Asigna la categoría correcta a cada transacción usando IA.
-// Lee la lista de categorías desde la hoja "setup" del spreadsheet
-// de conciliación. Solo procesa filas con la celda assigned_category vacía.
+// ==========================================
+// ASIGNACIÓN DE CATEGORÍAS — FUNCIÓN INDEPENDIENTE
+// Ejecutar por separado, no forma parte del formateo.
+// ==========================================
+
 function asignarCategorias() {
-  const spreadsheet     = SpreadsheetApp.openById(CONCILIATION_SHEET_ID);
-  const targetSheet     = spreadsheet.getSheetByName(LEDGER_TAB_NAME);
-  const headers         = targetSheet.getRange(1, 1, 1, targetSheet.getLastColumn()).getValues()[0];
-  const assignedCatCol  = headers.indexOf('assigned_category') + 1;
+  const spreadsheet = SpreadsheetApp.openById(CONCILIATION_SHEET_ID);
+  const ledger      = spreadsheet.getSheetByName(LEDGER_TAB_NAME);
+  const setupTab    = spreadsheet.getSheetByName(SETUP_TAB_NAME);
+
+  if (!ledger) {
+    Logger.log('❌ No existe la pestaña "' + LEDGER_TAB_NAME + '".');
+    return;
+  }
+  if (!setupTab) {
+    Logger.log('❌ No existe la pestaña "' + SETUP_TAB_NAME + '".');
+    return;
+  }
+
+  const headers        = ledger.getRange(1, 1, 1, ledger.getLastColumn()).getValues()[0];
+  const assignedCatCol = headers.indexOf('assigned_category') + 1;
 
   if (assignedCatCol === 0) {
     Logger.log("❌ No existe la columna 'assigned_category'. Ejecutá formatearHoja() primero.");
     return;
   }
 
-  const categorias = _leerCategorias(spreadsheet);
+  const categorias = _leerCategorias(setupTab);
   if (categorias.length === 0) {
-    Logger.log("❌ No se encontraron categorías. Verificá que exista la hoja 'setup' con categorías en la columna A.");
+    Logger.log('❌ No se encontraron categorías en la pestaña "' + SETUP_TAB_NAME + '".');
     return;
   }
 
-  Logger.log("📋 Categorías encontradas: " + categorias.join(', '));
-
-  _aplicarDropdownCategorias(targetSheet, assignedCatCol, categorias);
+  Logger.log('📋 Categorías: ' + categorias.join(', '));
+  _aplicarDropdownCategorias(ledger, assignedCatCol, categorias);
 
   const sa    = getServiceAccount();
   const token = obtenerTokenDeAcceso(sa);
-  _asignarCategoriasIA(targetSheet, headers, assignedCatCol, categorias, sa, token);
+  _asignarCategoriasIA(ledger, headers, assignedCatCol, categorias, sa, token);
 }
 
+
 // ── HELPERS INTERNOS ─────────────────────────────────────────────────────────
+
+function _leerCategorias(setupTab) {
+  try {
+    const valores = setupTab.getRange(1, 1, setupTab.getLastRow(), 1).getValues();
+    const inicio  = (valores[0] && valores[0][0].toString().toLowerCase().includes('categ')) ? 1 : 0;
+    return valores.slice(inicio).map(function(r) { return r[0].toString().trim(); }).filter(Boolean);
+  } catch(e) {
+    Logger.log('⚠️ Error leyendo categorías: ' + e.toString());
+    return [];
+  }
+}
 
 function _aplicarDropdownCategorias(sheet, col, categorias) {
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return;
-
   const rule = SpreadsheetApp.newDataValidation()
-    .requireValueInList(categorias, true)  // true = mostrar dropdown
-    .setAllowInvalid(true)                 // permite escribir valores no listados
+    .requireValueInList(categorias, true)
+    .setAllowInvalid(true)
     .build();
-
   sheet.getRange(2, col, lastRow - 1, 1).setDataValidation(rule);
-}
-
-function _leerCategorias(spreadsheet) {
-  // Busca la hoja con nombre exacto o insensible a mayúsculas
-  const sheets   = spreadsheet.getSheets();
-  const catSheet = sheets.find(function(s) {
-    return s.getName().toLowerCase() === SETUP_TAB_NAME.toLowerCase();
-  });
-
-  if (!catSheet) {
-    Logger.log("⚠️ Hojas disponibles: " + sheets.map(function(s) { return s.getName(); }).join(', '));
-    return [];
-  }
-
-  const valores = catSheet.getRange(1, 1, catSheet.getLastRow(), 1).getValues();
-  // Saltamos la primera fila si parece un header
-  const inicio  = (valores[0] && valores[0][0].toString().toLowerCase().includes('categ')) ? 1 : 0;
-  return valores.slice(inicio).map(function(r) { return r[0].toString().trim(); }).filter(Boolean);
 }
 
 function _asignarCategoriasIA(sheet, headers, assignedCategoryCol, categorias, sa, token) {
@@ -226,9 +240,9 @@ function _asignarCategoriasIA(sheet, headers, assignedCategoryCol, categorias, s
   if (lastRow < 2) return;
 
   const descIdx   = headers.indexOf('Description');
-  const amountIdx = headers.indexOf('Amount');
-  let   dateIdx   = headers.indexOf('Timestamp');
-  if (dateIdx === -1) dateIdx = headers.indexOf('Date (UTC)');
+  const amtInIdx  = headers.indexOf('Amount In (+)');
+  const amtOutIdx = headers.indexOf('Amount Out (-)');
+  const dateIdx   = headers.indexOf('Date (UTC)');
 
   const totalCols  = sheet.getLastColumn();
   const dataRango  = sheet.getRange(2, 1, lastRow - 1, totalCols).getValues();
@@ -239,11 +253,10 @@ function _asignarCategoriasIA(sheet, headers, assignedCategoryCol, categorias, s
   const mapeo      = [];
 
   for (let i = 0; i < dataRango.length; i++) {
-    // No sobreescribir si ya tiene categoría asignada
     if (catRango[i][0] && catRango[i][0].toString().trim() !== '') continue;
 
     const desc   = (dataRango[i][descIdx]   || '').toString();
-    const amount = (dataRango[i][amountIdx] || '').toString();
+    const amount = (dataRango[i][amtInIdx]  || dataRango[i][amtOutIdx] || '').toString();
     const date   = (dataRango[i][dateIdx]   || '').toString();
 
     if (!desc && !amount) continue;
@@ -258,15 +271,15 @@ function _asignarCategoriasIA(sheet, headers, assignedCategoryCol, categorias, s
               'Asigná la categoría más apropiada.\n' +
               'Respondé ÚNICAMENTE con el nombre exacto de la categoría, sin explicación ni puntuación.'
     });
-    mapeo.push(i + 2); // fila real en el sheet (1-indexed + header)
+    mapeo.push(i + 2);
   }
 
   if (peticiones.length === 0) {
-    Logger.log("ℹ️ Todas las filas ya tienen categoría asignada.");
+    Logger.log('ℹ️ Todas las filas ya tienen categoría asignada.');
     return;
   }
 
-  Logger.log("🏷️ Asignando categorías para " + peticiones.length + " filas...");
+  Logger.log('🏷️ Asignando categorías para ' + peticiones.length + ' filas...');
   const respuestas = ejecutarBatchIA(peticiones, token, sa);
 
   for (let k = 0; k < respuestas.length; k++) {
@@ -274,14 +287,13 @@ function _asignarCategoriasIA(sheet, headers, assignedCategoryCol, categorias, s
     try {
       const texto = JSON.parse(respuestas[k].getContentText())
                       .candidates[0].content.parts[0].text.trim();
-      // Preferir coincidencia exacta (case-insensitive); si no hay, escribir igual lo que devolvió la IA
       const match = categorias.find(function(c) { return c.toLowerCase() === texto.toLowerCase(); });
       sheet.getRange(mapeo[k], assignedCategoryCol).setValue(match || texto);
-      Logger.log("🏷️ Fila " + mapeo[k] + " → " + (match || texto));
+      Logger.log('🏷️ Fila ' + mapeo[k] + ' → ' + (match || texto));
     } catch(e) {
-      Logger.log("⚠️ Error procesando categoría fila " + mapeo[k] + ": " + e.toString());
+      Logger.log('⚠️ Error fila ' + mapeo[k] + ': ' + e.toString());
     }
   }
 
-  Logger.log("✅ Categorías asignadas.");
+  Logger.log('✅ Categorías asignadas.');
 }

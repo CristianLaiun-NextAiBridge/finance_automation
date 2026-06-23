@@ -1,26 +1,26 @@
 // ==========================================
 // SINCRONIZACIÓN DE TRANSACCIONES MERCURY
 //
-// Conecta con la API de Mercury para traer el historial de transacciones bancarias
-// y escribirlo en el Google Sheet definido por MERCURY_SOURCE_SHEET_ID.
+// Descarga el historial completo de transacciones desde la API de Mercury
+// y lo escribe en la pestaña MERCURY_TAB_NAME del spreadsheet de conciliación.
 //
-// En la primera ejecución (hoja vacía) hace una carga completa desde 2020-01-01.
-// En las siguientes, reemplaza únicamente la ventana de los últimos 30 días para
-// reflejar cambios de estado (pending → sent) sin reprocesar todo el histórico.
+// Los datos se guardan TAL CUAL vienen de la API, sin transformaciones,
+// con el único agregado de la columna "Balance" (saldo después de cada
+// transacción), calculada hacia atrás desde el saldo real de GET /accounts.
 //
-// Por cada transacción calcula el campo "Balance": el saldo de la cuenta
-// luego de ese movimiento. El cálculo trabaja hacia atrás desde el saldo real
-// actual que devuelve GET /accounts, garantizando que la última fila siempre
-// coincida con el saldo vigente.
+// Primera ejecución (pestaña vacía): carga completa desde 2020-01-01.
+// Ejecuciones siguientes: reemplaza solo la ventana de los últimos 30 días
+// para reflejar cambios de estado (pending → sent) sin reprocesar todo.
 //
-// El token de Mercury se lee desde Script Properties (MERCURY_API_TOKEN).
-// Para configurarlo ejecutá setupCredentials() en setup_credentials.js.
+// Credencial: MERCURY_API_TOKEN en Script Properties.
+// Configurar ejecutando setupCredentials() en setup_credentials.js.
 // ==========================================
 
 const CABECERAS_MERCURY = [
-  'Date (UTC)', 'Description', 'Amount In (+)', 'Amount Out (-)', 'Balance',
-  'Status', 'Category', 'Source of Category', 'Original Currency', 'kind',
-  'counterpartyId', 'counterpartyNickname', 'postedAt', 'dashboardLink', 'attachments', 'id'
+  'Date (UTC)', 'Timestamp', 'Description', 'Amount', 'Balance',
+  'Status', 'Bank Description', 'Reference', 'Note', 'Category',
+  'Source of Category', 'Original Currency', 'kind', 'counterpartyId',
+  'counterpartyNickname', 'postedAt', 'dashboardLink', 'attachments', 'id'
 ];
 
 function actualizarTablaMercury() {
@@ -38,6 +38,7 @@ function actualizarTablaMercury() {
     hoja = spreadsheet.insertSheet(MERCURY_TAB_NAME);
     Logger.log('📋 Pestaña "' + MERCURY_TAB_NAME + '" creada.');
   }
+
   const opciones = {
     method:             'get',
     headers:            { 'Authorization': 'Bearer ' + apiToken, 'Accept': 'application/json' },
@@ -58,13 +59,13 @@ function actualizarTablaMercury() {
     Logger.log('⚠️ No se pudo obtener el saldo actual: ' + e.toString());
   }
 
-  // ── 2. DETERMINAR MODO: COMPLETO O VENTANA ───────────────────────────────────
-  const lastRow     = hoja.getLastRow();
+  // ── 2. MODO: COMPLETO O VENTANA DE 30 DÍAS ───────────────────────────────────
+  const lastRow      = hoja.getLastRow();
   const esPrimeraVez = lastRow <= 1;
 
   const hace30Dias = new Date();
   hace30Dias.setDate(hace30Dias.getDate() - 30);
-  const fechaCorte = Utilities.formatDate(hace30Dias, 'UTC', 'yyyy-MM-dd');
+  const fechaCorte  = Utilities.formatDate(hace30Dias, 'UTC', 'yyyy-MM-dd');
   const fechaInicio = esPrimeraVez ? '2020-01-01' : fechaCorte;
 
   Logger.log(esPrimeraVez
@@ -75,17 +76,17 @@ function actualizarTablaMercury() {
   // ── 3. TRAER TRANSACCIONES ───────────────────────────────────────────────────
   let transacciones = [];
   let hayMas        = true;
-  let startAfter    = "";
+  let startAfter    = '';
 
   while (hayMas) {
     let url = 'https://api.mercury.com/api/v1/transactions?limit=500&start=' + fechaInicio;
-    if (startAfter !== "") url += '&start_after=' + startAfter;
+    if (startAfter) url += '&start_after=' + startAfter;
 
     const resp  = UrlFetchApp.fetch(url, opciones);
     const datos = JSON.parse(resp.getContentText());
 
     if (resp.getResponseCode() !== 200) {
-      Logger.log('❌ Error en la API de Mercury: ' + (datos.message || resp.getContentText()));
+      Logger.log('❌ Error API Mercury: ' + (datos.message || resp.getContentText()));
       return;
     }
 
@@ -103,10 +104,9 @@ function actualizarTablaMercury() {
     return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
   });
 
-  // ── 4. CALCULAR BALANCE AFTER ────────────────────────────────────────────────
-  // Anclaje: currentBalance de la API es el saldo real después de la última tx.
-  // Calculamos hacia atrás para asignar el saldo correcto a cada transacción.
-  const balanceAfter = new Array(transacciones.length).fill('');
+  // ── 4. CALCULAR BALANCE ──────────────────────────────────────────────────────
+  // Anclaje: currentBalance real de la API. Calculamos hacia atrás.
+  const balances = new Array(transacciones.length).fill('');
 
   const txPorCuenta = {};
   transacciones.forEach(function(tx, idx) {
@@ -122,89 +122,62 @@ function actualizarTablaMercury() {
 
     let saldo = saldoActual;
     for (let i = indices.length - 1; i >= 0; i--) {
-      balanceAfter[indices[i]] = Math.round(saldo * 100) / 100;
+      balances[indices[i]] = Math.round(saldo * 100) / 100;
       saldo = saldo - (transacciones[indices[i]].amount || 0);
     }
   });
 
-  // ── 5. ENCONTRAR Y ELIMINAR FILAS DE LA VENTANA EN LA HOJA ──────────────────
+  // ── 5. ELIMINAR FILAS DE LA VENTANA ANTERIOR ────────────────────────────────
   if (esPrimeraVez) {
     hoja.clearContents();
     hoja.getRange(1, 1, 1, CABECERAS_MERCURY.length).setValues([CABECERAS_MERCURY]);
   } else {
-    // Buscar la primera fila cuya fecha >= fechaCorte
     const fechasDatos = hoja.getRange(2, 1, lastRow - 1, 1).getValues();
     let filaCorte = -1;
-
     for (let i = 0; i < fechasDatos.length; i++) {
       let dateVal = fechasDatos[i][0];
-      if (dateVal instanceof Date) {
-        dateVal = Utilities.formatDate(dateVal, 'UTC', 'yyyy-MM-dd');
-      }
-      if (dateVal.toString() >= fechaCorte) {
-        filaCorte = i + 2; // +1 por índice, +1 por header
-        break;
-      }
+      if (dateVal instanceof Date) dateVal = Utilities.formatDate(dateVal, 'UTC', 'yyyy-MM-dd');
+      if (dateVal.toString() >= fechaCorte) { filaCorte = i + 2; break; }
     }
-
     if (filaCorte !== -1) {
-      const filasAEliminar = hoja.getLastRow() - filaCorte + 1;
-      hoja.deleteRows(filaCorte, filasAEliminar);
-      Logger.log('🗑️ Eliminadas ' + filasAEliminar + ' filas de la ventana anterior.');
+      hoja.deleteRows(filaCorte, hoja.getLastRow() - filaCorte + 1);
+      Logger.log('🗑️ Filas de la ventana anterior eliminadas.');
     }
   }
 
-  // ── 6. ESCRIBIR NUEVAS FILAS ─────────────────────────────────────────────────
+  // ── 6. ESCRIBIR FILAS RAW ────────────────────────────────────────────────────
   const filas = transacciones.map(function(tx, idx) {
     const card    = tx.merchant || {};
     const details = tx.details  || {};
     const cxInfo  = tx.currencyExchangeInfo || {};
 
     const merchantName = card.name || details.merchantName || '';
+    const description  = tx.counterpartyName || merchantName || tx.bankDescription || tx.externalMemo || tx.note || 'Sin detalles';
     const category     = (tx.mercuryCategory ? tx.mercuryCategory.name : '') || (tx.categoryData ? tx.categoryData.name : '') || '';
-
-    // Unificar todas las fuentes de descripción en un solo campo, eliminando duplicados
-    const descParts = [
-      tx.counterpartyName  || merchantName      || '',
-      tx.bankDescription                        || '',
-      tx.externalMemo      || tx.referenceNumber || '',
-      tx.note                                   || ''
-    ].map(function(s) { return s.toString().trim(); }).filter(Boolean);
-
-    const seen = new Set();
-    const description = descParts.filter(function(p) {
-      const key = p.toLowerCase();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    }).join(' | ') || 'Sin detalles';
-
-    const rawAmount = tx.amount !== undefined ? tx.amount : 0;
-    const amountIn  = rawAmount > 0 ? rawAmount            : '';
-    const amountOut = rawAmount < 0 ? Math.abs(rawAmount)  : '';
 
     return [
       tx.createdAt ? tx.createdAt.substring(0, 10) : '',
+      tx.createdAt ? new Date(tx.createdAt)         : '',
       description,
-      amountIn,
-      amountOut,
-      balanceAfter[idx],
-      tx.status                                                   || '',
+      tx.amount !== undefined ? tx.amount           : '',
+      balances[idx],
+      tx.status                                     || '',
+      tx.bankDescription                            || '',
+      tx.externalMemo || tx.referenceNumber         || '',
+      tx.note                                       || '',
       category,
       tx.sourceOfCategory || (tx.mercuryCategory ? 'Mercury' : '') || '',
-      cxInfo.originalCurrency || tx.currency                      || 'USD',
-      tx.kind                                                     || '',
-      tx.counterpartyId                                           || '',
-      tx.counterpartyNickname                                     || '',
-      tx.postedAt ? new Date(tx.postedAt)                         : '',
-      tx.dashboardLink                                            || '',
-      tx.attachments ? tx.attachments.length                      : 0,
-      tx.id                                                       || ''
+      cxInfo.originalCurrency || tx.currency        || 'USD',
+      tx.kind                                       || '',
+      tx.counterpartyId                             || '',
+      tx.counterpartyNickname                       || '',
+      tx.postedAt ? new Date(tx.postedAt)           : '',
+      tx.dashboardLink                              || '',
+      tx.attachments ? tx.attachments.length        : 0,
+      tx.id                                         || ''
     ];
   });
 
-  const insertRow = hoja.getLastRow() + 1;
-  hoja.getRange(insertRow, 1, filas.length, CABECERAS_MERCURY.length).setValues(filas);
-
-  Logger.log('✅ ' + filas.length + ' transacciones escritas desde fila ' + insertRow + '.');
+  hoja.getRange(hoja.getLastRow() + 1, 1, filas.length, CABECERAS_MERCURY.length).setValues(filas);
+  Logger.log('✅ ' + filas.length + ' transacciones escritas en pestaña "' + MERCURY_TAB_NAME + '".');
 }
