@@ -336,10 +336,11 @@ function _asignarCategoriasIA(sheet, headers, assignedCategoryCol, categorias, s
   const lastRow   = sheet.getLastRow();
   if (lastRow < 2) return;
 
-  const descIdx   = headers.indexOf('Description');
-  const amtInIdx  = headers.indexOf('Amount In (+)');
-  const amtOutIdx = headers.indexOf('Amount Out (-)');
-  const dateIdx   = headers.indexOf('Date');
+  const checkedIdx = headers.indexOf('Checked');
+  const descIdx    = headers.indexOf('Description');
+  const amtInIdx   = headers.indexOf('Amount In (+)');
+  const amtOutIdx  = headers.indexOf('Amount Out (-)');
+  const dateIdx    = headers.indexOf('Date');
 
   const totalCols  = sheet.getLastColumn();
   const dataRango  = sheet.getRange(2, 1, lastRow - 1, totalCols).getValues();
@@ -350,6 +351,8 @@ function _asignarCategoriasIA(sheet, headers, assignedCategoryCol, categorias, s
   const mapeo      = [];
 
   for (let i = 0; i < dataRango.length; i++) {
+    // Filas verificadas son sagradas — no se tocan
+    if (checkedIdx !== -1 && dataRango[i][checkedIdx] === true) continue;
     if (catRango[i][0] && catRango[i][0].toString().trim() !== '') continue;
 
     const desc   = (dataRango[i][descIdx]   || '').toString();

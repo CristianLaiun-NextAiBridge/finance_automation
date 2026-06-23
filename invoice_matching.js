@@ -36,12 +36,13 @@ function matchearFacturasConDrive() {
   const dataFinal   = targetSheet.getDataRange().getValues();
   const headers     = dataFinal[0];
 
-  const ReceiptCol  = headers.indexOf('Receipt')    + 1;
-  const jsonInfoCol     = headers.indexOf('JSON Data')       + 1;
-  const finalAmtInIdx   = headers.indexOf('Amount In (+)');
-  const finalAmtOutIdx  = headers.indexOf('Amount Out (-)');
-  const finalDescIdx    = headers.indexOf('Description');
-  const finalDateIdx    = headers.indexOf('Date (UTC)');
+  const ReceiptCol    = headers.indexOf('Receipt')      + 1;
+  const jsonInfoCol   = headers.indexOf('JSON Data')    + 1;
+  const checkedIdx    = headers.indexOf('Checked');
+  const finalAmtInIdx = headers.indexOf('Amount In (+)');
+  const finalAmtOutIdx= headers.indexOf('Amount Out (-)');
+  const finalDescIdx  = headers.indexOf('Description');
+  const finalDateIdx  = headers.indexOf('Date');
 
   if (ReceiptCol === 0 || jsonInfoCol === 0) {
     Logger.log("❌ No se encontraron las columnas 'Receipt' o 'JSON Data'. Ejecutá formatearHoja() primero.");
@@ -83,7 +84,11 @@ function matchearFacturasConDrive() {
   const filasYaMatcheadas = new Set();
 
   for (let i = 1; i < dataFinal.length; i++) {
-    const row                    = dataFinal[i];
+    const row = dataFinal[i];
+
+    // Filas verificadas son sagradas — no se tocan
+    if (checkedIdx !== -1 && row[checkedIdx] === true) continue;
+
     const valorComprobanteActual = (row[ReceiptCol - 1] || "").toString();
 
     // Autocorrección: links crudos → fórmula HYPERLINK
