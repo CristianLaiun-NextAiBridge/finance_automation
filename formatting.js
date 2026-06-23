@@ -5,7 +5,7 @@
 // en la pestaña "Ledger", aplicando:
 //
 // - Columnas del Ledger: Checked | Date | Description | Category |
-//   comments | Amount In (+) | Amount Out (-) | Balance | Status | comprobante | JSON Data
+//   Comments | Amount In (+) | Amount Out (-) | Account balance | Status | Receipt | JSON Data
 // - Description: unificación de Description + Bank Description + Reference + Note,
 //   eliminando duplicados y separando con " | "
 // - Amount: dividido en Amount In (+) para créditos y Amount Out (-) para débitos
@@ -17,8 +17,8 @@
 
 // Columnas base del Ledger — orden definitivo
 const LEDGER_BASE_HEADERS = [
-  'Checked', 'Date', 'Description', 'Category', 'comments',
-  'Amount In (+)', 'Amount Out (-)', 'Balance'
+  'Checked', 'Date', 'Description', 'Category', 'Comments',
+  'Amount In (+)', 'Amount Out (-)', 'Account balance'
 ];
 
 function formatearHoja() {
@@ -50,7 +50,7 @@ function formatearHoja() {
     reference:   srcHeaders.indexOf('Reference'),
     note:        srcHeaders.indexOf('Note'),
     amount:      srcHeaders.indexOf('Amount'),
-    balance:     srcHeaders.indexOf('Balance')
+    balance:     srcHeaders.indexOf('Account balance')
   };
 
   // ── 1. INICIALIZAR HEADERS DEL LEDGER SI ESTÁ VACÍO ─────────────────────────
@@ -72,7 +72,7 @@ function formatearHoja() {
     return col;
   }
 
-  ensureColumn('comprobante');
+  ensureColumn('Receipt');
   ensureColumn('JSON Data');
 
   // Dropdown de categorías en Category (si la hoja setup existe)
@@ -144,10 +144,10 @@ function formatearHoja() {
     fila[ledgerHeaders.indexOf('Date')]        = date;
     fila[ledgerHeaders.indexOf('Description')]       = description;
     fila[ledgerHeaders.indexOf('Category')] = '';
-    fila[ledgerHeaders.indexOf('comments')]          = '';
+    fila[ledgerHeaders.indexOf('Comments')]          = '';
     fila[ledgerHeaders.indexOf('Amount In (+)')]     = amountIn;
     fila[ledgerHeaders.indexOf('Amount Out (-)')]    = amountOut;
-    fila[ledgerHeaders.indexOf('Balance')]           = row[SI.balance];
+    fila[ledgerHeaders.indexOf('Account balance')]           = row[SI.balance];
 
     nuevasFilas.push(fila);
     existingKeys.add(clave);

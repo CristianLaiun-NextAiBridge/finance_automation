@@ -1,18 +1,18 @@
 // ==========================================
 // MATCHING DE FACTURAS CON COMPROBANTES DE DRIVE
 //
-// Para cada transacción de la hoja de conciliación que no tiene comprobante
+// Para cada transacción de la hoja de conciliación que no tiene Receipt
 // asignado, busca en la carpeta de Drive (FOLDER_COMPROBANTES_ID) el archivo
 // (PDF/imagen + JSON) que la ampara.
 //
 // El proceso es en dos pasos:
 // 1. PRE-FILTRO: descarta candidatos que no coincidan en monto y fecha/proveedor
 //    para reducir las llamadas a la IA.
-// 2. VALIDACIÓN IA (batch): Gemini 2.5 Flash decide si el comprobante ampara la
+// 2. VALIDACIÓN IA (batch): Gemini 2.5 Flash decide si el Receipt ampara la
 //    transacción. Las llamadas se agrupan en lotes de 40 para no saturar
 //    UrlFetchApp.fetchAll().
 //
-// Al confirmar un match escribe hipervínculos en las columnas "comprobante"
+// Al confirmar un match escribe hipervínculos en las columnas "Receipt"
 // (PDF) y "JSON Data" (JSON extraído).
 //
 // Depende de: Code.js (getServiceAccount, obtenerTokenDeAcceso,
@@ -20,7 +20,7 @@
 // ==========================================
 
 function matchearFacturasConDrive() {
-  Logger.log("🔍 Iniciando matching de facturas con comprobantes de Drive...");
+  Logger.log("🔍 Iniciando matching de facturas con Receipts de Drive...");
 
   let token;
   let sa;
@@ -36,20 +36,20 @@ function matchearFacturasConDrive() {
   const dataFinal   = targetSheet.getDataRange().getValues();
   const headers     = dataFinal[0];
 
-  const comprobanteCol  = headers.indexOf('comprobante')    + 1;
+  const ReceiptCol  = headers.indexOf('Receipt')    + 1;
   const jsonInfoCol     = headers.indexOf('JSON Data')       + 1;
   const finalAmtInIdx   = headers.indexOf('Amount In (+)');
   const finalAmtOutIdx  = headers.indexOf('Amount Out (-)');
   const finalDescIdx    = headers.indexOf('Description');
   const finalDateIdx    = headers.indexOf('Date (UTC)');
 
-  if (comprobanteCol === 0 || jsonInfoCol === 0) {
-    Logger.log("❌ No se encontraron las columnas 'comprobante' o 'JSON Data'. Ejecutá formatearHoja() primero.");
+  if (ReceiptCol === 0 || jsonInfoCol === 0) {
+    Logger.log("❌ No se encontraron las columnas 'Receipt' o 'JSON Data'. Ejecutá formatearHoja() primero.");
     return;
   }
 
   // ── 1. CARGAR COMPROBANTES DE DRIVE EN MEMORIA ───────────────────────────────
-  Logger.log("📂 Cargando comprobantes desde Drive...");
+  Logger.log("📂 Cargando Receipts desde Drive...");
   const folder            = DriveApp.getFolderById(FOLDER_COMPROBANTES_ID);
   const files             = folder.getFiles();
   const jsonFiles         = [];
@@ -75,7 +75,7 @@ function matchearFacturasConDrive() {
     }
   }
 
-  Logger.log("📁 " + jsonFiles.length + " JSONs de comprobantes cargados.");
+  Logger.log("📁 " + jsonFiles.length + " JSONs de Receipts cargados.");
 
   // ── 2. AUTOCORRECCIÓN DE LINKS VIEJOS + ARMAR PETICIONES IA ─────────────────
   const peticiones        = [];
@@ -84,11 +84,11 @@ function matchearFacturasConDrive() {
 
   for (let i = 1; i < dataFinal.length; i++) {
     const row                    = dataFinal[i];
-    const valorComprobanteActual = (row[comprobanteCol - 1] || "").toString();
+    const valorComprobanteActual = (row[ReceiptCol - 1] || "").toString();
 
     // Autocorrección: links crudos → fórmula HYPERLINK
     if (valorComprobanteActual.includes("http") && !valorComprobanteActual.startsWith("=")) {
-      targetSheet.getRange(i + 1, comprobanteCol).setFormula('=HYPERLINK("' + valorComprobanteActual + '", "Link")');
+      targetSheet.getRange(i + 1, ReceiptCol).setFormula('=HYPERLINK("' + valorComprobanteActual + '", "Link")');
       for (const name in fileUrls) {
         if (fileUrls[name] === valorComprobanteActual && jsonUrlsByBaseName[name]) {
           targetSheet.getRange(i + 1, jsonInfoCol).setFormula('=HYPERLINK("' + jsonUrlsByBaseName[name] + '", "Link")');
@@ -117,9 +117,9 @@ function matchearFacturasConDrive() {
                 '- Fecha de impacto bancario: ' + txDate + '\n' +
                 '- Monto debitado: $' + txAmount + '\n' +
                 '- Descripción del Banco: ' + txDesc + '\n\n' +
-                'Datos extraídos del comprobante físico (JSON):\n' +
+                'Datos extraídos del Receipt físico (JSON):\n' +
                 cand.contentStr + '\n\n' +
-                'Instrucciones: Determina si este comprobante ampara este movimiento. ' +
+                'Instrucciones: Determina si este Receipt ampara este movimiento. ' +
                 'Sé flexible con fechas (pagos con tarjeta pueden reflejarse días después). ' +
                 'Match si: 1. Monto exacto. 2. Proveedor concuerda. 3. Fecha lógica.\n' +
                 'Responde ÚNICAMENTE con la palabra "SI" o "NO".'
@@ -150,7 +150,7 @@ function matchearFacturasConDrive() {
           const fileLink = fileUrls[m.json.baseName]      || "";
           const jsonLink = m.json.jsonUrl                  || "";
 
-          if (fileLink) targetSheet.getRange(m.fila, comprobanteCol).setFormula('=HYPERLINK("' + fileLink + '", "Link")');
+          if (fileLink) targetSheet.getRange(m.fila, ReceiptCol).setFormula('=HYPERLINK("' + fileLink + '", "Link")');
           if (jsonLink) targetSheet.getRange(m.fila, jsonInfoCol).setFormula('=HYPERLINK("' + jsonLink + '", "Link")');
 
           Logger.log("✅ Match: Fila " + m.fila + " [$" + m.txAmount + "] → " + m.json.baseName);
