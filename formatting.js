@@ -210,10 +210,9 @@ function formatearHoja() {
   // ── 6. COLUMNA COMMENTS: COLOR CELESTE + ÚNICA EDITABLE ─────────────────────
   const commentsCol = ledgerHeaders.indexOf('Comments') + 1;
   if (commentsCol > 0) {
-    // Pintar toda la columna de celeste clarito (datos + header diferenciado)
-    ledger.getRange(1, commentsCol).setBackground('#89c4e1');            // header celeste medio
+    // Pintar solo las filas de datos de celeste clarito (el header lo cubre el azul general)
     if (lastRow > 1) {
-      ledger.getRange(2, commentsCol, ledger.getMaxRows() - 1, 1).setBackground('#d1ecf1'); // celeste claro
+      ledger.getRange(2, commentsCol, ledger.getMaxRows() - 1, 1).setBackground('#d1ecf1');
     }
 
     // Proteger la hoja completa dejando solo Comments editable
