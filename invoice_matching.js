@@ -36,12 +36,12 @@ function matchearFacturasConDrive() {
   const dataFinal   = targetSheet.getDataRange().getValues();
   const headers     = dataFinal[0];
 
-  const comprobanteCol = headers.indexOf('comprobante') + 1;
-  const jsonInfoCol    = headers.indexOf('JSON Data')   + 1;
-  const finalAmountIdx = headers.indexOf('Amount');
-  const finalDescIdx   = headers.indexOf('Description');
-  let   finalDateIdx   = headers.indexOf('Timestamp');
-  if (finalDateIdx === -1) finalDateIdx = headers.indexOf('Date (UTC)');
+  const comprobanteCol  = headers.indexOf('comprobante')    + 1;
+  const jsonInfoCol     = headers.indexOf('JSON Data')       + 1;
+  const finalAmtInIdx   = headers.indexOf('Amount In (+)');
+  const finalAmtOutIdx  = headers.indexOf('Amount Out (-)');
+  const finalDescIdx    = headers.indexOf('Description');
+  const finalDateIdx    = headers.indexOf('Date (UTC)');
 
   if (comprobanteCol === 0 || jsonInfoCol === 0) {
     Logger.log("❌ No se encontraron las columnas 'comprobante' o 'JSON Data'. Ejecutá formatearHoja() primero.");
@@ -100,9 +100,9 @@ function matchearFacturasConDrive() {
 
     if (valorComprobanteActual !== "") continue;
 
-    const amountStr = (row[finalAmountIdx] || "").toString().replace(/,/g, '');
-    if (!amountStr) continue;
-    const txAmount  = Math.abs(parseFloat(amountStr));
+    const rawAmount = row[finalAmtInIdx] || row[finalAmtOutIdx] || '';
+    if (!rawAmount) continue;
+    const txAmount  = Math.abs(parseFloat(rawAmount.toString().replace(/,/g, '')));
 
     const txDate = row[finalDateIdx];
     const txDesc = (row[finalDescIdx] || '').toString().trim();

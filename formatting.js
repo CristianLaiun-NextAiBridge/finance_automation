@@ -29,22 +29,23 @@ function formatearHoja() {
   let currentData = targetSheet.getLastRow() > 0 ? targetSheet.getDataRange().getValues() : [];
   let headers     = currentData.length > 0 ? currentData[0] : [];
 
-  const existingTxIds   = new Set();
-  const currentIdIdx    = headers.indexOf('id');
-  let   currentDateIdx  = headers.indexOf('Timestamp');
-  if (currentDateIdx === -1) currentDateIdx = headers.indexOf('Date (UTC)');
-  const currentAmountIdx = headers.indexOf('Amount');
+  const existingTxIds    = new Set();
+  const currentIdIdx     = headers.indexOf('id');
+  const currentDateIdx   = headers.indexOf('Date (UTC)');
+  const currentAmtInIdx  = headers.indexOf('Amount In (+)');
+  const currentAmtOutIdx = headers.indexOf('Amount Out (-)');
   const currentDescIdx   = headers.indexOf('Description');
 
   for (let r = 1; r < currentData.length; r++) {
     if (currentIdIdx !== -1 && currentData[r][currentIdIdx]) {
       existingTxIds.add(currentData[r][currentIdIdx].toString().trim());
-    } else if (currentDateIdx !== -1 && currentAmountIdx !== -1) {
+    } else if (currentDateIdx !== -1) {
       let dateVal = currentData[r][currentDateIdx];
       if (dateVal instanceof Date) dateVal = Utilities.formatDate(dateVal, Session.getScriptTimeZone(), "yyyy-MM-dd");
-      const amountVal = currentData[r][currentAmountIdx] ? Math.abs(parseFloat(currentData[r][currentAmountIdx])).toFixed(2) : "0.00";
-      const descVal   = (currentData[r][currentDescIdx] || '').toString().toLowerCase().trim();
-      existingTxIds.add(dateVal + '_' + amountVal + '_' + descVal);
+      const rawAmt  = currentData[r][currentAmtInIdx] || currentData[r][currentAmtOutIdx] || 0;
+      const amtVal  = Math.abs(parseFloat(rawAmt.toString())).toFixed(2);
+      const descVal = (currentData[r][currentDescIdx] || '').toString().toLowerCase().trim();
+      existingTxIds.add(dateVal + '_' + amtVal + '_' + descVal);
     }
   }
 
@@ -56,14 +57,14 @@ function formatearHoja() {
     return;
   }
 
-  const sourceHeaders  = sourceData[0];
-  const sourceIdIdx    = sourceHeaders.indexOf('id');
-  const amountIdx      = sourceHeaders.indexOf('Amount');
-  let   dateIdx        = sourceHeaders.indexOf('Timestamp');
-  if (dateIdx === -1) dateIdx = sourceHeaders.indexOf('Date (UTC)');
-  const descIdx        = sourceHeaders.indexOf('Description');
+  const sourceHeaders   = sourceData[0];
+  const sourceIdIdx     = sourceHeaders.indexOf('id');
+  const amountInIdx     = sourceHeaders.indexOf('Amount In (+)');
+  const amountOutIdx    = sourceHeaders.indexOf('Amount Out (-)');
+  let   dateIdx         = sourceHeaders.indexOf('Date (UTC)');
+  const descIdx         = sourceHeaders.indexOf('Description');
 
-  if (sourceIdIdx === -1 || amountIdx === -1 || dateIdx === -1) {
+  if (sourceIdIdx === -1 || dateIdx === -1) {
     Logger.log("❌ El sheet fuente no tiene el formato esperado.");
     return;
   }
@@ -81,9 +82,11 @@ function formatearHoja() {
     const txId   = row[sourceIdIdx];
     let   txDate = row[dateIdx];
     if (txDate instanceof Date) txDate = Utilities.formatDate(txDate, Session.getScriptTimeZone(), "yyyy-MM-dd");
-    const txAmount = row[amountIdx] ? Math.abs(parseFloat(row[amountIdx])).toFixed(2) : "0.00";
-    const txDesc   = (row[descIdx] || '').toString().toLowerCase().trim();
-    const compKey  = txDate + '_' + txAmount + '_' + txDesc;
+    // Tomar el monto de cualquiera de las dos columnas para la clave de deduplicación
+    const rawAmount = row[amountInIdx] || row[amountOutIdx] || 0;
+    const txAmount  = Math.abs(parseFloat(rawAmount.toString())).toFixed(2);
+    const txDesc    = (row[descIdx] || '').toString().toLowerCase().trim();
+    const compKey   = txDate + '_' + txAmount + '_' + txDesc;
 
     if ((txId && existingTxIds.has(txId.toString().trim())) || existingTxIds.has(compKey)) continue;
 

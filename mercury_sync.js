@@ -18,7 +18,7 @@
 // ==========================================
 
 const CABECERAS_MERCURY = [
-  'Date (UTC)', 'Timestamp', 'Description', 'Amount', 'Balance After',
+  'Date (UTC)', 'Description', 'Amount In (+)', 'Amount Out (-)', 'Balance After',
   'Status', 'Category', 'Source of Category', 'Original Currency', 'kind',
   'counterpartyId', 'counterpartyNickname', 'postedAt', 'dashboardLink', 'attachments', 'id'
 ];
@@ -174,11 +174,15 @@ function actualizarTablaMercury() {
       return true;
     }).join(' | ') || 'Sin detalles';
 
+    const rawAmount = tx.amount !== undefined ? tx.amount : 0;
+    const amountIn  = rawAmount > 0 ? rawAmount            : '';
+    const amountOut = rawAmount < 0 ? Math.abs(rawAmount)  : '';
+
     return [
-      tx.createdAt ? tx.createdAt.substring(0, 10)               : '',
-      tx.createdAt ? new Date(tx.createdAt)                       : '',
+      tx.createdAt ? tx.createdAt.substring(0, 10) : '',
       description,
-      tx.amount !== undefined ? tx.amount                         : '',
+      amountIn,
+      amountOut,
       balanceAfter[idx],
       tx.status                                                   || '',
       category,
