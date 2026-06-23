@@ -1,1 +1,7 @@
 node_modules/
+
+# Nunca subir archivos con credenciales reales
+*.local.js
+credentials*.js
+secrets*.js
+service_account*.json
