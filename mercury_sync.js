@@ -8,7 +8,7 @@
 // En las siguientes, reemplaza únicamente la ventana de los últimos 30 días para
 // reflejar cambios de estado (pending → sent) sin reprocesar todo el histórico.
 //
-// Por cada transacción calcula el campo "Balance After": el saldo de la cuenta
+// Por cada transacción calcula el campo "Balance": el saldo de la cuenta
 // luego de ese movimiento. El cálculo trabaja hacia atrás desde el saldo real
 // actual que devuelve GET /accounts, garantizando que la última fila siempre
 // coincida con el saldo vigente.
@@ -18,7 +18,7 @@
 // ==========================================
 
 const CABECERAS_MERCURY = [
-  'Date (UTC)', 'Description', 'Amount In (+)', 'Amount Out (-)', 'Balance After',
+  'Date (UTC)', 'Description', 'Amount In (+)', 'Amount Out (-)', 'Balance',
   'Status', 'Category', 'Source of Category', 'Original Currency', 'kind',
   'counterpartyId', 'counterpartyNickname', 'postedAt', 'dashboardLink', 'attachments', 'id'
 ];
