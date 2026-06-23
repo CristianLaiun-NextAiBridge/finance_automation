@@ -354,9 +354,19 @@ function _asignarCategoriasIA(sheet, headers, assignedCategoryCol, categorias, s
   for (let k = 0; k < respuestas.length; k++) {
     if (!respuestas[k] || respuestas[k].getResponseCode() !== 200) continue;
     try {
-      const texto = JSON.parse(respuestas[k].getContentText())
-                      .candidates[0].content.parts[0].text.trim();
-      const match = categorias.find(function(c) { return c.toLowerCase() === texto.toLowerCase(); });
+      const texto     = JSON.parse(respuestas[k].getContentText())
+                          .candidates[0].content.parts[0].text.trim();
+      const textoLow  = texto.toLowerCase();
+
+      // 1. Match exacto
+      let match = categorias.find(function(c) { return c.toLowerCase() === textoLow; });
+      // 2. La categoría empieza con lo que devolvió la IA
+      if (!match) match = categorias.find(function(c) { return c.toLowerCase().startsWith(textoLow); });
+      // 3. Lo que devolvió la IA empieza con la categoría (IA devolvió texto más largo)
+      if (!match) match = categorias.find(function(c) { return textoLow.startsWith(c.toLowerCase()); });
+      // 4. Contiene el texto
+      if (!match) match = categorias.find(function(c) { return c.toLowerCase().includes(textoLow); });
+
       sheet.getRange(mapeo[k], assignedCategoryCol).setValue(match || texto);
       Logger.log('🏷️ Fila ' + mapeo[k] + ' → ' + (match || texto));
     } catch(e) {
