@@ -11,6 +11,12 @@ const CONCILIATION_SHEET_ID = "19-SS1TaCDNcSZvZsTHpIdwudZSzrssbagIHmNl4hj5U";
 // Nombre de la pestaña donde se vuelca la raw data de Mercury
 const MERCURY_TAB_NAME = 'mercury';
 
+// Nombre de la pestaña principal de conciliación
+const LEDGER_TAB_NAME = 'Ledger';
+
+// Nombre de la pestaña de configuración (categorías, etc.)
+const SETUP_TAB_NAME = 'setup';
+
 // Columnas de la pestaña mercury que no se copian a la hoja de conciliación
 const COLUMNAS_A_SACAR = ['counterpartyId', 'counterpartyNickname', 'id'];
 

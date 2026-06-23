@@ -32,7 +32,7 @@ function matchearFacturasConDrive() {
     return;
   }
 
-  const targetSheet = SpreadsheetApp.openById(CONCILIATION_SHEET_ID).getSheets()[0];
+  const targetSheet = SpreadsheetApp.openById(CONCILIATION_SHEET_ID).getSheetByName(LEDGER_TAB_NAME);
   const dataFinal   = targetSheet.getDataRange().getValues();
   const headers     = dataFinal[0];
 

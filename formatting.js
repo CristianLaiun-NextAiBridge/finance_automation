@@ -10,7 +10,7 @@
 // 2. GESTIÓN DE COLUMNAS:
 //    - "comprobante" y "JSON Data": usadas por invoice_matching.js
 //    - "assigned_category": la IA asigna automáticamente una categoría tomando
-//      como referencia la lista de la hoja "asigned_category" del mismo archivo.
+//      como referencia la lista de la hoja "setup" del mismo archivo.
 //      Solo se procesa si la celda está vacía.
 //    - "comments": columna libre para anotaciones manuales de los usuarios.
 //      Nunca se sobreescribe si ya tiene contenido.
@@ -23,7 +23,7 @@ function formatearHoja() {
   Logger.log("🎨 Iniciando formateo y sincronización de la hoja...");
 
   const spreadsheet = SpreadsheetApp.openById(CONCILIATION_SHEET_ID);
-  const targetSheet = spreadsheet.getSheets()[0];
+  const targetSheet = spreadsheet.getSheetByName(LEDGER_TAB_NAME);
 
   // ── 1. SINCRONIZAR FILAS NUEVAS DESDE MERCURY ───────────────────────────────
   let currentData = targetSheet.getLastRow() > 0 ? targetSheet.getDataRange().getValues() : [];
@@ -130,7 +130,7 @@ function formatearHoja() {
   const commentsCol         = ensureColumn('comments');
 
   // ── 3. ASIGNAR CATEGORÍAS CON IA ─────────────────────────────────────────────
-  // Lee la lista de categorías desde la hoja "asigned_category" del mismo archivo.
+  // Lee la lista de categorías desde la hoja "setup" del mismo archivo.
   // Solo procesa filas con la celda assigned_category vacía.
   const categorias = _leerCategorias(spreadsheet);
 
@@ -144,7 +144,7 @@ function formatearHoja() {
     const token = obtenerTokenDeAcceso(sa);
     _asignarCategoriasIA(targetSheet, headers, assignedCategoryCol, categorias, sa, token);
   } else {
-    Logger.log("⚠️ No se encontraron categorías en la hoja 'asigned_category'. Se omite asignación.");
+    Logger.log("⚠️ No se encontraron categorías en la hoja 'setup'. Se omite asignación.");
   }
 
   // ── 4. FORMATO VISUAL ────────────────────────────────────────────────────────
@@ -161,11 +161,11 @@ function formatearHoja() {
 // ── FUNCIÓN STANDALONE: se puede ejecutar sola o es llamada por formatearHoja() ──
 
 // Asigna la categoría correcta a cada transacción usando IA.
-// Lee la lista de categorías desde la hoja "asigned_category" del spreadsheet
+// Lee la lista de categorías desde la hoja "setup" del spreadsheet
 // de conciliación. Solo procesa filas con la celda assigned_category vacía.
 function asignarCategorias() {
   const spreadsheet     = SpreadsheetApp.openById(CONCILIATION_SHEET_ID);
-  const targetSheet     = spreadsheet.getSheets()[0];
+  const targetSheet     = spreadsheet.getSheetByName(LEDGER_TAB_NAME);
   const headers         = targetSheet.getRange(1, 1, 1, targetSheet.getLastColumn()).getValues()[0];
   const assignedCatCol  = headers.indexOf('assigned_category') + 1;
 
@@ -176,7 +176,7 @@ function asignarCategorias() {
 
   const categorias = _leerCategorias(spreadsheet);
   if (categorias.length === 0) {
-    Logger.log("❌ No se encontraron categorías. Verificá que exista la hoja 'asigned_category' con categorías en la columna A.");
+    Logger.log("❌ No se encontraron categorías. Verificá que exista la hoja 'setup' con categorías en la columna A.");
     return;
   }
 
@@ -207,7 +207,7 @@ function _leerCategorias(spreadsheet) {
   // Busca la hoja con nombre exacto o insensible a mayúsculas
   const sheets   = spreadsheet.getSheets();
   const catSheet = sheets.find(function(s) {
-    return s.getName().toLowerCase().replace(/\s/g,'') === 'asigned_category';
+    return s.getName().toLowerCase() === SETUP_TAB_NAME.toLowerCase();
   });
 
   if (!catSheet) {
