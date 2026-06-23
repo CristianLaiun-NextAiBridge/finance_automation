@@ -187,15 +187,8 @@ function formatearHoja() {
     if (idx > 0) ledger.setColumnWidth(idx, colWidths[col]);
   });
 
-  // Alternating row colors (banding): blanco / gris clarito
-  const bandingRange = ledger.getRange(1, 1, ledger.getMaxRows(), lastCol);
-  // Quitar bandings previos para no duplicar
-  bandingRange.getBandings().forEach(function(b) { b.remove(); });
-  bandingRange.applyRowBanding(SpreadsheetApp.BandingTheme.LIGHT_GREY)
-    .setHeaderRowColor('#4a86e8')
-    .setFirstRowColor('#ffffff')
-    .setSecondRowColor('#f3f3f3')
-    .setFooterRowColor(null);
+  // Quitar bandings previos si los hubiera
+  ledger.getRange(1, 1, ledger.getMaxRows(), lastCol).getBandings().forEach(function(b) { b.remove(); });
 
   // Formato de dinero con 1 decimal en columnas de montos
   if (lastRow > 1) {
@@ -240,7 +233,7 @@ function formatearHoja() {
   if (commentsCol > 0) {
     // Pintar solo las filas de datos de celeste clarito (el header lo cubre el azul general)
     if (lastRow > 1) {
-      ledger.getRange(2, commentsCol, ledger.getMaxRows() - 1, 1).setBackground('#d1ecf1');
+      ledger.getRange(2, commentsCol, ledger.getMaxRows() - 1, 1).setBackground('#eaf6fb');
     }
 
     // Proteger la hoja completa dejando solo Comments editable
