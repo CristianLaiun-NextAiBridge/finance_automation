@@ -32,7 +32,12 @@ function actualizarTablaMercury() {
     return;
   }
 
-  const hoja = SpreadsheetApp.openById(MERCURY_SOURCE_SHEET_ID).getSheets()[0];
+  const spreadsheet = SpreadsheetApp.openById(CONCILIATION_SHEET_ID);
+  let hoja = spreadsheet.getSheetByName(MERCURY_TAB_NAME);
+  if (!hoja) {
+    hoja = spreadsheet.insertSheet(MERCURY_TAB_NAME);
+    Logger.log('📋 Pestaña "' + MERCURY_TAB_NAME + '" creada.');
+  }
   const opciones = {
     method:             'get',
     headers:            { 'Authorization': 'Bearer ' + apiToken, 'Accept': 'application/json' },

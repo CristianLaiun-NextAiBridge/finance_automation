@@ -51,9 +51,14 @@ function formatearHoja() {
 
   let sourceData = [];
   try {
-    sourceData = SpreadsheetApp.openById(MERCURY_SOURCE_SHEET_ID).getSheets()[0].getDataRange().getValues();
+    const mercuryTab = SpreadsheetApp.openById(CONCILIATION_SHEET_ID).getSheetByName(MERCURY_TAB_NAME);
+    if (!mercuryTab) {
+      Logger.log('❌ No existe la pestaña "' + MERCURY_TAB_NAME + '". Ejecutá actualizarTablaMercury() primero.');
+      return;
+    }
+    sourceData = mercuryTab.getDataRange().getValues();
   } catch(e) {
-    Logger.log("❌ Error leyendo el sheet fuente de Mercury: " + e.toString());
+    Logger.log("❌ Error leyendo la pestaña mercury: " + e.toString());
     return;
   }
 

@@ -5,13 +5,13 @@
 // ID de la carpeta de Drive donde están los PDFs y JSONs de comprobantes
 const FOLDER_COMPROBANTES_ID = "1rNWOhiTWnX7SvzAf-mg_LaVEoeJN0DP5";
 
-// ID del Google Sheet con la raw data de Mercury (actualizado por mercury_sync.js)
-const MERCURY_SOURCE_SHEET_ID = "1hWPRWPka_yOFpp6nnwVcS4zxNZ62VU2ipVMXGIgsm4c";
-
-// ID del Google Sheet de conciliación (donde se formatea y matchea)
+// ID del Google Sheet de conciliación — contiene todas las pestañas del proyecto
 const CONCILIATION_SHEET_ID = "19-SS1TaCDNcSZvZsTHpIdwudZSzrssbagIHmNl4hj5U";
 
-// Columnas del sheet de Mercury que no se copian a la hoja de conciliación
+// Nombre de la pestaña donde se vuelca la raw data de Mercury
+const MERCURY_TAB_NAME = 'mercury';
+
+// Columnas de la pestaña mercury que no se copian a la hoja de conciliación
 const COLUMNAS_A_SACAR = ['counterpartyId', 'counterpartyNickname', 'id'];
 
 // ==========================================
