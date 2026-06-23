@@ -169,6 +169,16 @@ function formatearHoja() {
   ledger.setFrozenRows(1);
   if (!ledger.getFilter()) headerRange.createFilter();
 
+  // Formato de dinero con 1 decimal en columnas de montos
+  if (lastRow > 1) {
+    const moneyFormat = '$#,##0.0';
+    const moneyCols   = ['Amount In (+)', 'Amount Out (-)', 'Account balance'];
+    moneyCols.forEach(function(col) {
+      const idx = ledgerHeaders.indexOf(col) + 1;
+      if (idx > 0) ledger.getRange(2, idx, lastRow - 1, 1).setNumberFormat(moneyFormat);
+    });
+  }
+
   // Checkboxes en columna Checked (no toca celdas que ya tienen valor)
   const checkedCol = ledgerHeaders.indexOf('Checked') + 1;
   if (checkedCol > 0 && lastRow > 1) {
