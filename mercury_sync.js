@@ -19,9 +19,8 @@
 
 const CABECERAS_MERCURY = [
   'Date (UTC)', 'Timestamp', 'Description', 'Amount', 'Balance After',
-  'Status', 'Bank Description', 'Reference', 'Note', 'Category',
-  'Source of Category', 'Original Currency', 'kind', 'counterpartyId',
-  'counterpartyNickname', 'postedAt', 'dashboardLink', 'attachments', 'id'
+  'Status', 'Category', 'Source of Category', 'Original Currency', 'kind',
+  'counterpartyId', 'counterpartyNickname', 'postedAt', 'dashboardLink', 'attachments', 'id'
 ];
 
 function actualizarTablaMercury() {
@@ -157,8 +156,23 @@ function actualizarTablaMercury() {
     const cxInfo  = tx.currencyExchangeInfo || {};
 
     const merchantName = card.name || details.merchantName || '';
-    const description  = tx.counterpartyName || merchantName || tx.bankDescription || tx.externalMemo || tx.note || 'Sin detalles';
     const category     = (tx.mercuryCategory ? tx.mercuryCategory.name : '') || (tx.categoryData ? tx.categoryData.name : '') || '';
+
+    // Unificar todas las fuentes de descripción en un solo campo, eliminando duplicados
+    const descParts = [
+      tx.counterpartyName  || merchantName      || '',
+      tx.bankDescription                        || '',
+      tx.externalMemo      || tx.referenceNumber || '',
+      tx.note                                   || ''
+    ].map(function(s) { return s.toString().trim(); }).filter(Boolean);
+
+    const seen = new Set();
+    const description = descParts.filter(function(p) {
+      const key = p.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).join(' | ') || 'Sin detalles';
 
     return [
       tx.createdAt ? tx.createdAt.substring(0, 10)               : '',
@@ -167,9 +181,6 @@ function actualizarTablaMercury() {
       tx.amount !== undefined ? tx.amount                         : '',
       balanceAfter[idx],
       tx.status                                                   || '',
-      tx.bankDescription                                          || '',
-      tx.externalMemo || tx.referenceNumber                       || '',
-      tx.note                                                     || '',
       category,
       tx.sourceOfCategory || (tx.mercuryCategory ? 'Mercury' : '') || '',
       cxInfo.originalCurrency || tx.currency                      || 'USD',

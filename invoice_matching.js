@@ -36,12 +36,11 @@ function matchearFacturasConDrive() {
   const dataFinal   = targetSheet.getDataRange().getValues();
   const headers     = dataFinal[0];
 
-  const comprobanteCol  = headers.indexOf('comprobante') + 1;
-  const jsonInfoCol     = headers.indexOf('JSON Data')   + 1;
-  const finalAmountIdx  = headers.indexOf('Amount');
-  const finalDescIdx    = headers.indexOf('Description');
-  const finalBankDescIdx = headers.indexOf('Bank Description');
-  let   finalDateIdx    = headers.indexOf('Timestamp');
+  const comprobanteCol = headers.indexOf('comprobante') + 1;
+  const jsonInfoCol    = headers.indexOf('JSON Data')   + 1;
+  const finalAmountIdx = headers.indexOf('Amount');
+  const finalDescIdx   = headers.indexOf('Description');
+  let   finalDateIdx   = headers.indexOf('Timestamp');
   if (finalDateIdx === -1) finalDateIdx = headers.indexOf('Date (UTC)');
 
   if (comprobanteCol === 0 || jsonInfoCol === 0) {
@@ -105,9 +104,8 @@ function matchearFacturasConDrive() {
     if (!amountStr) continue;
     const txAmount  = Math.abs(parseFloat(amountStr));
 
-    const txDate    = row[finalDateIdx];
-    const bankDesc  = finalBankDescIdx !== -1 ? row[finalBankDescIdx] : '';
-    const txDesc    = ((row[finalDescIdx] || '') + ' ' + (bankDesc || '')).trim();
+    const txDate = row[finalDateIdx];
+    const txDesc = (row[finalDescIdx] || '').toString().trim();
 
     const candidatos = preFiltrarCandidatosAmplio(txAmount, txDate, txDesc, jsonFiles);
 
