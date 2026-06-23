@@ -4,7 +4,7 @@
 // Lee los datos raw de la pestaña "mercury" y los transforma al escribirlos
 // en la pestaña "Ledger", aplicando:
 //
-// - Columnas del Ledger: Checked | Date (UTC) | Description | assigned_category |
+// - Columnas del Ledger: Checked | Date | Description | Category |
 //   comments | Amount In (+) | Amount Out (-) | Balance | Status | comprobante | JSON Data
 // - Description: unificación de Description + Bank Description + Reference + Note,
 //   eliminando duplicados y separando con " | "
@@ -17,8 +17,8 @@
 
 // Columnas base del Ledger — orden definitivo
 const LEDGER_BASE_HEADERS = [
-  'Checked', 'Date (UTC)', 'Description', 'assigned_category', 'comments',
-  'Amount In (+)', 'Amount Out (-)', 'Balance', 'Status'
+  'Checked', 'Date', 'Description', 'Category', 'comments',
+  'Amount In (+)', 'Amount Out (-)', 'Balance'
 ];
 
 function formatearHoja() {
@@ -44,14 +44,13 @@ function formatearHoja() {
   // Índices en la pestaña mercury
   const SI = {
     id:          srcHeaders.indexOf('id'),
-    date:        srcHeaders.indexOf('Date (UTC)'),
+    date:        srcHeaders.indexOf('Date'),
     description: srcHeaders.indexOf('Description'),
     bankDesc:    srcHeaders.indexOf('Bank Description'),
     reference:   srcHeaders.indexOf('Reference'),
     note:        srcHeaders.indexOf('Note'),
     amount:      srcHeaders.indexOf('Amount'),
-    balance:     srcHeaders.indexOf('Balance'),
-    status:      srcHeaders.indexOf('Status')
+    balance:     srcHeaders.indexOf('Balance')
   };
 
   // ── 1. INICIALIZAR HEADERS DEL LEDGER SI ESTÁ VACÍO ─────────────────────────
@@ -76,19 +75,19 @@ function formatearHoja() {
   ensureColumn('comprobante');
   ensureColumn('JSON Data');
 
-  // Dropdown de categorías en assigned_category (si la hoja setup existe)
+  // Dropdown de categorías en Category (si la hoja setup existe)
   const setupTab = spreadsheet.getSheetByName(SETUP_TAB_NAME);
   if (setupTab) {
     const categorias = _leerCategorias(setupTab);
     if (categorias.length > 0) {
-      const assignedCol = ledgerHeaders.indexOf('assigned_category') + 1;
+      const assignedCol = ledgerHeaders.indexOf('Category') + 1;
       _aplicarDropdownCategorias(ledger, assignedCol, categorias);
     }
   }
 
   // ── 3. CONSTRUIR SET DE IDs YA EN LEDGER (deduplicación) ────────────────────
   const existingKeys    = new Set();
-  const ledgerDateIdx   = ledgerHeaders.indexOf('Date (UTC)');
+  const ledgerDateIdx   = ledgerHeaders.indexOf('Date');
   const ledgerAmtInIdx  = ledgerHeaders.indexOf('Amount In (+)');
   const ledgerAmtOutIdx = ledgerHeaders.indexOf('Amount Out (-)');
   const ledgerDescIdx   = ledgerHeaders.indexOf('Description');
@@ -142,14 +141,13 @@ function formatearHoja() {
     // Construir fila del Ledger
     const fila = new Array(ledgerHeaders.length).fill('');
     fila[ledgerHeaders.indexOf('Checked')]           = false;
-    fila[ledgerHeaders.indexOf('Date (UTC)')]        = date;
+    fila[ledgerHeaders.indexOf('Date')]        = date;
     fila[ledgerHeaders.indexOf('Description')]       = description;
-    fila[ledgerHeaders.indexOf('assigned_category')] = '';
+    fila[ledgerHeaders.indexOf('Category')] = '';
     fila[ledgerHeaders.indexOf('comments')]          = '';
     fila[ledgerHeaders.indexOf('Amount In (+)')]     = amountIn;
     fila[ledgerHeaders.indexOf('Amount Out (-)')]    = amountOut;
     fila[ledgerHeaders.indexOf('Balance')]           = row[SI.balance];
-    fila[ledgerHeaders.indexOf('Status')]            = row[SI.status] || '';
 
     nuevasFilas.push(fila);
     existingKeys.add(clave);
@@ -223,10 +221,10 @@ function asignarCategorias() {
   }
 
   const headers        = ledger.getRange(1, 1, 1, ledger.getLastColumn()).getValues()[0];
-  const assignedCatCol = headers.indexOf('assigned_category') + 1;
+  const assignedCatCol = headers.indexOf('Category') + 1;
 
   if (assignedCatCol === 0) {
-    Logger.log("❌ No existe la columna 'assigned_category'. Ejecutá formatearHoja() primero.");
+    Logger.log("❌ No existe la columna 'Category'. Ejecutá formatearHoja() primero.");
     return;
   }
 
@@ -286,7 +284,7 @@ function _asignarCategoriasIA(sheet, headers, assignedCategoryCol, categorias, s
   const descIdx   = headers.indexOf('Description');
   const amtInIdx  = headers.indexOf('Amount In (+)');
   const amtOutIdx = headers.indexOf('Amount Out (-)');
-  const dateIdx   = headers.indexOf('Date (UTC)');
+  const dateIdx   = headers.indexOf('Date');
 
   const totalCols  = sheet.getLastColumn();
   const dataRango  = sheet.getRange(2, 1, lastRow - 1, totalCols).getValues();
