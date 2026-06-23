@@ -41,16 +41,19 @@ function getServiceAccount() {
 }
 
 // ==========================================
-// ORQUESTADOR PRINCIPAL
-// Ejecuta el pipeline completo en orden:
-// 1. Formatea la hoja y asigna categorías (formatting.js)
-// 2. Matchea facturas con comprobantes de Drive (invoice_matching.js)
+// ORQUESTADORES
 // ==========================================
-function procesarConciliacion() {
-  Logger.log("🚀 Iniciando pipeline de conciliación contable...");
+
+// Pipeline completo del Ledger — ejecutado a las 6 AM y 4 PM por trigger:
+// 1. formatearHoja()            — sincroniza filas nuevas y aplica formato
+// 2. asignarCategorias()        — categoriza filas sin categoría con IA
+// 3. matchearFacturasConDrive() — matchea receipts con IA
+function procesarLedger() {
+  Logger.log("🚀 Iniciando pipeline del Ledger...");
   formatearHoja();
+  asignarCategorias();
   matchearFacturasConDrive();
-  Logger.log("✅ Pipeline finalizado.");
+  Logger.log("✅ Pipeline del Ledger finalizado.");
 }
 
 // ==========================================
