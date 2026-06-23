@@ -4,8 +4,8 @@
 // Lee los datos raw de la pestaña "mercury" y los transforma al escribirlos
 // en la pestaña "Ledger", aplicando:
 //
-// - Columnas del Ledger: Date (UTC), Description, Amount In (+), Amount Out (-),
-//   Balance, Status  [+ comprobante, JSON Data, assigned_category, comments]
+// - Columnas del Ledger: Checked | Date (UTC) | Description | assigned_category |
+//   comments | Amount In (+) | Amount Out (-) | Balance | Status | comprobante | JSON Data
 // - Description: unificación de Description + Bank Description + Reference + Note,
 //   eliminando duplicados y separando con " | "
 // - Amount: dividido en Amount In (+) para créditos y Amount Out (-) para débitos
@@ -15,9 +15,10 @@
 // asignarCategorias() es una función INDEPENDIENTE — no se llama desde aquí.
 // ==========================================
 
-// Columnas base del Ledger (sin las columnas de gestión que se agregan después)
+// Columnas base del Ledger — orden definitivo
 const LEDGER_BASE_HEADERS = [
-  'Date (UTC)', 'Description', 'Amount In (+)', 'Amount Out (-)', 'Balance', 'Status'
+  'Checked', 'Date (UTC)', 'Description', 'assigned_category', 'comments',
+  'Amount In (+)', 'Amount Out (-)', 'Balance', 'Status'
 ];
 
 function formatearHoja() {
@@ -61,7 +62,7 @@ function formatearHoja() {
   // ── 2. LEER ESTADO ACTUAL DEL LEDGER ────────────────────────────────────────
   let ledgerHeaders = ledger.getRange(1, 1, 1, ledger.getLastColumn()).getValues()[0];
 
-  // Asegurar columnas de gestión
+  // Asegurar columnas de gestión extra (van al final)
   function ensureColumn(name) {
     let col = ledgerHeaders.indexOf(name) + 1;
     if (col === 0) {
@@ -74,8 +75,6 @@ function formatearHoja() {
 
   ensureColumn('comprobante');
   ensureColumn('JSON Data');
-  ensureColumn('assigned_category');
-  ensureColumn('comments');
 
   // Dropdown de categorías en assigned_category (si la hoja setup existe)
   const setupTab = spreadsheet.getSheetByName(SETUP_TAB_NAME);
@@ -88,11 +87,12 @@ function formatearHoja() {
   }
 
   // ── 3. CONSTRUIR SET DE IDs YA EN LEDGER (deduplicación) ────────────────────
-  const existingKeys = new Set();
+  const existingKeys    = new Set();
   const ledgerDateIdx   = ledgerHeaders.indexOf('Date (UTC)');
   const ledgerAmtInIdx  = ledgerHeaders.indexOf('Amount In (+)');
   const ledgerAmtOutIdx = ledgerHeaders.indexOf('Amount Out (-)');
   const ledgerDescIdx   = ledgerHeaders.indexOf('Description');
+  // ledgerHeaders.indexOf('Checked') = 0 → no se usa para deduplicación
 
   if (ledger.getLastRow() > 1) {
     const ledgerData = ledger.getRange(2, 1, ledger.getLastRow() - 1, ledgerHeaders.length).getValues();
@@ -139,14 +139,17 @@ function formatearHoja() {
 
     if (existingKeys.has(clave)) continue;
 
-    // Construir fila del Ledger (rellena con '' las columnas de gestión)
+    // Construir fila del Ledger
     const fila = new Array(ledgerHeaders.length).fill('');
-    fila[ledgerHeaders.indexOf('Date (UTC)')]    = date;
-    fila[ledgerHeaders.indexOf('Description')]   = description;
-    fila[ledgerHeaders.indexOf('Amount In (+)')] = amountIn;
-    fila[ledgerHeaders.indexOf('Amount Out (-)')] = amountOut;
-    fila[ledgerHeaders.indexOf('Balance')]        = row[SI.balance];
-    fila[ledgerHeaders.indexOf('Status')]         = row[SI.status] || '';
+    fila[ledgerHeaders.indexOf('Checked')]           = false;
+    fila[ledgerHeaders.indexOf('Date (UTC)')]        = date;
+    fila[ledgerHeaders.indexOf('Description')]       = description;
+    fila[ledgerHeaders.indexOf('assigned_category')] = '';
+    fila[ledgerHeaders.indexOf('comments')]          = '';
+    fila[ledgerHeaders.indexOf('Amount In (+)')]     = amountIn;
+    fila[ledgerHeaders.indexOf('Amount Out (-)')]    = amountOut;
+    fila[ledgerHeaders.indexOf('Balance')]           = row[SI.balance];
+    fila[ledgerHeaders.indexOf('Status')]            = row[SI.status] || '';
 
     nuevasFilas.push(fila);
     existingKeys.add(clave);
@@ -161,10 +164,40 @@ function formatearHoja() {
 
   // ── 5. FORMATO VISUAL ────────────────────────────────────────────────────────
   const lastCol     = ledger.getLastColumn();
+  const lastRow     = ledger.getLastRow();
   const headerRange = ledger.getRange(1, 1, 1, lastCol);
+
   headerRange.setBackground('#4a86e8').setFontColor('#ffffff').setFontWeight('bold');
   ledger.setFrozenRows(1);
   if (!ledger.getFilter()) headerRange.createFilter();
+
+  // Checkboxes en columna Checked (no toca celdas que ya tienen valor)
+  const checkedCol = ledgerHeaders.indexOf('Checked') + 1;
+  if (checkedCol > 0 && lastRow > 1) {
+    const checkboxRule = SpreadsheetApp.newDataValidation().requireCheckbox().build();
+    ledger.getRange(2, checkedCol, lastRow - 1, 1).setDataValidation(checkboxRule);
+  }
+
+  // Conditional formatting: fila completa verde claro cuando Checked = TRUE
+  if (checkedCol > 0 && lastRow > 1) {
+    const checkedColLetter = _colLetter(checkedCol);
+    const dataRange        = ledger.getRange(2, 1, ledger.getMaxRows() - 1, lastCol);
+
+    const greenRule = SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied('=$' + checkedColLetter + '2=TRUE')
+      .setBackground('#b7e1cd') // verde claro
+      .setRanges([dataRange])
+      .build();
+
+    // Reemplazar reglas anteriores de Checked para no duplicar
+    const existingRules = ledger.getConditionalFormatRules().filter(function(r) {
+      const cond = r.getBooleanCondition();
+      return !(cond && cond.getCriteriaValues()[0] &&
+               cond.getCriteriaValues()[0].toString().includes(checkedColLetter));
+    });
+    existingRules.push(greenRule);
+    ledger.setConditionalFormatRules(existingRules);
+  }
 
   Logger.log('✅ Formateo del Ledger completado.');
 }
@@ -213,6 +246,17 @@ function asignarCategorias() {
 
 
 // ── HELPERS INTERNOS ─────────────────────────────────────────────────────────
+
+// Convierte número de columna (1-based) a letra(s): 1→A, 26→Z, 27→AA
+function _colLetter(col) {
+  let letter = '';
+  while (col > 0) {
+    const rem = (col - 1) % 26;
+    letter = String.fromCharCode(65 + rem) + letter;
+    col = Math.floor((col - 1) / 26);
+  }
+  return letter;
+}
 
 function _leerCategorias(setupTab) {
   try {
