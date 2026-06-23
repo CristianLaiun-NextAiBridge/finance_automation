@@ -1,7 +1,20 @@
 // ==========================================
 // SINCRONIZACIÓN DE TRANSACCIONES MERCURY
-// - Primera ejecución (hoja vacía): carga completa desde 2020-01-01
-// - Ejecuciones siguientes: reemplaza solo la ventana de los últimos 30 días
+//
+// Conecta con la API de Mercury para traer el historial de transacciones bancarias
+// y escribirlo en el Google Sheet definido por MERCURY_SOURCE_SHEET_ID.
+//
+// En la primera ejecución (hoja vacía) hace una carga completa desde 2020-01-01.
+// En las siguientes, reemplaza únicamente la ventana de los últimos 30 días para
+// reflejar cambios de estado (pending → sent) sin reprocesar todo el histórico.
+//
+// Por cada transacción calcula el campo "Balance After": el saldo de la cuenta
+// luego de ese movimiento. El cálculo trabaja hacia atrás desde el saldo real
+// actual que devuelve GET /accounts, garantizando que la última fila siempre
+// coincida con el saldo vigente.
+//
+// El token de Mercury se lee desde Script Properties (MERCURY_API_TOKEN).
+// Para configurarlo ejecutá setupCredentials() en setup_credentials.js.
 // ==========================================
 
 const CABECERAS_MERCURY = [
