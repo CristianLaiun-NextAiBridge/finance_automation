@@ -1,8 +1,15 @@
 // ==========================================
 // SINCRONIZACIÓN DE TRANSACCIONES MERCURY
-// Lee el token desde Script Properties (nunca hardcodeado).
-// Configurarlo: ejecutá setupCredentials() en setup_credentials.js
+// - Primera ejecución (hoja vacía): carga completa desde 2020-01-01
+// - Ejecuciones siguientes: reemplaza solo la ventana de los últimos 30 días
 // ==========================================
+
+const CABECERAS_MERCURY = [
+  'Date (UTC)', 'Timestamp', 'Description', 'Amount', 'Balance After',
+  'Status', 'Bank Description', 'Reference', 'Note', 'Category',
+  'Source of Category', 'Original Currency', 'kind', 'counterpartyId',
+  'counterpartyNickname', 'postedAt', 'dashboardLink', 'attachments', 'id'
+];
 
 function actualizarTablaMercury() {
   const props    = PropertiesService.getScriptProperties();
@@ -14,117 +21,124 @@ function actualizarTablaMercury() {
   }
 
   const hoja = SpreadsheetApp.openById(MERCURY_SOURCE_SHEET_ID).getSheets()[0];
-
   const opciones = {
     method:             'get',
     headers:            { 'Authorization': 'Bearer ' + apiToken, 'Accept': 'application/json' },
     muteHttpExceptions: true
   };
 
-  // ── 1. SALDO ACTUAL DE CADA CUENTA ──────────────────────────────────────────
-  // Usamos GET /accounts para anclar el cálculo del saldo corriente.
-  // Si hay varias cuentas, el saldo se calcula por separado para cada una.
-  const saldosPorCuenta = {};   // { accountId: currentBalance }
+  // ── 1. SALDO ACTUAL POR CUENTA ───────────────────────────────────────────────
+  const saldosPorCuenta = {};
   try {
     const respCuentas = UrlFetchApp.fetch('https://api.mercury.com/api/v1/accounts', opciones);
     if (respCuentas.getResponseCode() === 200) {
-      const cuentas = JSON.parse(respCuentas.getContentText()).accounts || [];
-      cuentas.forEach(function(c) {
+      (JSON.parse(respCuentas.getContentText()).accounts || []).forEach(function(c) {
         saldosPorCuenta[c.id] = c.currentBalance;
+        Logger.log('Cuenta: ' + c.name + ' | Saldo actual: $' + c.currentBalance);
       });
-      Logger.log('Cuentas encontradas: ' + cuentas.map(c => c.name + ' ($' + c.currentBalance + ')').join(', '));
     }
   } catch(e) {
     Logger.log('⚠️ No se pudo obtener el saldo actual: ' + e.toString());
   }
 
-  // ── 2. TRAER TODAS LAS TRANSACCIONES ────────────────────────────────────────
-  Logger.log('Trayendo todo el histórico de TODAS las cuentas...');
+  // ── 2. DETERMINAR MODO: COMPLETO O VENTANA ───────────────────────────────────
+  const lastRow     = hoja.getLastRow();
+  const esPrimeraVez = lastRow <= 1;
 
-  let todasLasTransacciones = [];
-  let hayMas     = true;
-  let startAfter = "";
+  const hace30Dias = new Date();
+  hace30Dias.setDate(hace30Dias.getDate() - 30);
+  const fechaCorte = Utilities.formatDate(hace30Dias, 'UTC', 'yyyy-MM-dd');
+  const fechaInicio = esPrimeraVez ? '2020-01-01' : fechaCorte;
+
+  Logger.log(esPrimeraVez
+    ? '🚀 Primera ejecución: carga completa desde 2020-01-01'
+    : '🔄 Modo incremental: actualizando ventana desde ' + fechaCorte
+  );
+
+  // ── 3. TRAER TRANSACCIONES ───────────────────────────────────────────────────
+  let transacciones = [];
+  let hayMas        = true;
+  let startAfter    = "";
 
   while (hayMas) {
-    let url = 'https://api.mercury.com/api/v1/transactions?limit=500&start=2020-01-01';
+    let url = 'https://api.mercury.com/api/v1/transactions?limit=500&start=' + fechaInicio;
     if (startAfter !== "") url += '&start_after=' + startAfter;
 
-    const respuesta = UrlFetchApp.fetch(url, opciones);
-    const datos     = JSON.parse(respuesta.getContentText());
+    const resp  = UrlFetchApp.fetch(url, opciones);
+    const datos = JSON.parse(resp.getContentText());
 
-    if (respuesta.getResponseCode() !== 200) {
-      Logger.log('Error en la API de Mercury: ' + (datos.message || respuesta.getContentText()));
+    if (resp.getResponseCode() !== 200) {
+      Logger.log('❌ Error en la API de Mercury: ' + (datos.message || resp.getContentText()));
       return;
     }
 
-    todasLasTransacciones = todasLasTransacciones.concat(datos.transactions || []);
-
-    if (datos.page && datos.page.nextPage) {
-      startAfter = datos.page.nextPage;
-    } else {
-      hayMas = false;
-    }
+    transacciones = transacciones.concat(datos.transactions || []);
+    hayMas        = !!(datos.page && datos.page.nextPage);
+    if (hayMas) startAfter = datos.page.nextPage;
   }
 
-  if (todasLasTransacciones.length === 0) {
-    Logger.log('No se encontraron transacciones.');
+  if (transacciones.length === 0) {
+    Logger.log('ℹ️ No se encontraron transacciones para el período.');
     return;
   }
 
-  // Ordenar de más antigua a más nueva
-  todasLasTransacciones.sort(function(a, b) {
+  transacciones.sort(function(a, b) {
     return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
   });
 
-  // ── 3. CALCULAR SALDO CORRIENTE POR CUENTA ──────────────────────────────────
-  // Estrategia: el saldo actual de la API es el punto de anclaje (el más confiable).
-  // Trabajamos HACIA ATRÁS desde ese valor para reconstruir el saldo después de
-  // cada transacción. Solo se incluyen transacciones con status "sent" o "pending"
-  // ya que las "failed" no afectan el saldo real.
-  //
-  // saldoCorreinte[i] = saldo de la cuenta DESPUÉS de que se ejecutó la tx i.
+  // ── 4. CALCULAR BALANCE AFTER ────────────────────────────────────────────────
+  // Anclaje: currentBalance de la API es el saldo real después de la última tx.
+  // Calculamos hacia atrás para asignar el saldo correcto a cada transacción.
+  const balanceAfter = new Array(transacciones.length).fill('');
 
-  // Agrupar índices por accountId
   const txPorCuenta = {};
-  todasLasTransacciones.forEach(function(tx, idx) {
+  transacciones.forEach(function(tx, idx) {
     const aid = tx.accountId || 'unknown';
     if (!txPorCuenta[aid]) txPorCuenta[aid] = [];
     txPorCuenta[aid].push(idx);
   });
 
-  const saldoCorreinte = new Array(todasLasTransacciones.length).fill('');
-
   Object.keys(txPorCuenta).forEach(function(accountId) {
-    const indices = txPorCuenta[accountId]; // ya están en orden cronológico
+    const indices     = txPorCuenta[accountId];
     const saldoActual = saldosPorCuenta[accountId];
+    if (saldoActual === undefined) return;
 
-    if (saldoActual === undefined) {
-      // Sin anclaje: no podemos calcular el saldo corriente para esta cuenta
-      return;
-    }
-
-    // El saldo después de la ÚLTIMA transacción = saldoActual
-    // Trabajamos hacia atrás: saldo_antes_de_tx = saldo_despues_de_tx - tx.amount
     let saldo = saldoActual;
     for (let i = indices.length - 1; i >= 0; i--) {
-      const tx = todasLasTransacciones[indices[i]];
-      saldoCorreinte[indices[i]] = Math.round(saldo * 100) / 100;
-      saldo = saldo - (tx.amount || 0);
+      balanceAfter[indices[i]] = Math.round(saldo * 100) / 100;
+      saldo = saldo - (transacciones[indices[i]].amount || 0);
     }
   });
 
-  // ── 4. ESCRIBIR EN LA HOJA ───────────────────────────────────────────────────
-  hoja.clearContents();
+  // ── 5. ENCONTRAR Y ELIMINAR FILAS DE LA VENTANA EN LA HOJA ──────────────────
+  if (esPrimeraVez) {
+    hoja.clearContents();
+    hoja.getRange(1, 1, 1, CABECERAS_MERCURY.length).setValues([CABECERAS_MERCURY]);
+  } else {
+    // Buscar la primera fila cuya fecha >= fechaCorte
+    const fechasDatos = hoja.getRange(2, 1, lastRow - 1, 1).getValues();
+    let filaCorte = -1;
 
-  const cabeceras = [
-    'Date (UTC)', 'Timestamp', 'Description', 'Amount', 'Balance After',
-    'Status', 'Bank Description', 'Reference', 'Note', 'Category',
-    'Source of Category', 'Original Currency', 'kind', 'counterpartyId',
-    'counterpartyNickname', 'postedAt', 'dashboardLink', 'attachments', 'id'
-  ];
-  hoja.getRange(1, 1, 1, cabeceras.length).setValues([cabeceras]);
+    for (let i = 0; i < fechasDatos.length; i++) {
+      let dateVal = fechasDatos[i][0];
+      if (dateVal instanceof Date) {
+        dateVal = Utilities.formatDate(dateVal, 'UTC', 'yyyy-MM-dd');
+      }
+      if (dateVal.toString() >= fechaCorte) {
+        filaCorte = i + 2; // +1 por índice, +1 por header
+        break;
+      }
+    }
 
-  const filas = todasLasTransacciones.map(function(tx, idx) {
+    if (filaCorte !== -1) {
+      const filasAEliminar = hoja.getLastRow() - filaCorte + 1;
+      hoja.deleteRows(filaCorte, filasAEliminar);
+      Logger.log('🗑️ Eliminadas ' + filasAEliminar + ' filas de la ventana anterior.');
+    }
+  }
+
+  // ── 6. ESCRIBIR NUEVAS FILAS ─────────────────────────────────────────────────
+  const filas = transacciones.map(function(tx, idx) {
     const card    = tx.merchant || {};
     const details = tx.details  || {};
     const cxInfo  = tx.currencyExchangeInfo || {};
@@ -134,31 +148,30 @@ function actualizarTablaMercury() {
     const category     = (tx.mercuryCategory ? tx.mercuryCategory.name : '') || (tx.categoryData ? tx.categoryData.name : '') || '';
 
     return [
-      tx.createdAt ? tx.createdAt.substring(0, 10)      : '',
-      tx.createdAt ? new Date(tx.createdAt)              : '',
+      tx.createdAt ? tx.createdAt.substring(0, 10)               : '',
+      tx.createdAt ? new Date(tx.createdAt)                       : '',
       description,
-      tx.amount !== undefined ? tx.amount                : '',
-      saldoCorreinte[idx],                                         // ← Balance After
-      tx.status                                          || '',
-      tx.bankDescription                                 || '',
-      tx.externalMemo || tx.referenceNumber              || '',
-      tx.note                                            || '',
+      tx.amount !== undefined ? tx.amount                         : '',
+      balanceAfter[idx],
+      tx.status                                                   || '',
+      tx.bankDescription                                          || '',
+      tx.externalMemo || tx.referenceNumber                       || '',
+      tx.note                                                     || '',
       category,
       tx.sourceOfCategory || (tx.mercuryCategory ? 'Mercury' : '') || '',
-      cxInfo.originalCurrency || tx.currency             || 'USD',
-      tx.kind                                            || '',
-      tx.counterpartyId                                  || '',
-      tx.counterpartyNickname                            || '',
-      tx.postedAt ? new Date(tx.postedAt)                : '',
-      tx.dashboardLink                                   || '',
-      tx.attachments ? tx.attachments.length             : 0,
-      tx.id                                              || ''
+      cxInfo.originalCurrency || tx.currency                      || 'USD',
+      tx.kind                                                     || '',
+      tx.counterpartyId                                           || '',
+      tx.counterpartyNickname                                     || '',
+      tx.postedAt ? new Date(tx.postedAt)                         : '',
+      tx.dashboardLink                                            || '',
+      tx.attachments ? tx.attachments.length                      : 0,
+      tx.id                                                       || ''
     ];
   });
 
-  if (filas.length > 0) {
-    hoja.getRange(2, 1, filas.length, cabeceras.length).setValues(filas);
-  }
+  const insertRow = hoja.getLastRow() + 1;
+  hoja.getRange(insertRow, 1, filas.length, CABECERAS_MERCURY.length).setValues(filas);
 
-  Logger.log(`✅ Proceso terminado. ${filas.length} transacciones cargadas con saldo corriente.`);
+  Logger.log('✅ ' + filas.length + ' transacciones escritas desde fila ' + insertRow + '.');
 }
