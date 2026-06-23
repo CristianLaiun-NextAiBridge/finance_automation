@@ -22,8 +22,8 @@
 function formatearHoja() {
   Logger.log("🎨 Iniciando formateo y sincronización de la hoja...");
 
-  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-  const targetSheet = spreadsheet.getActiveSheet();
+  const spreadsheet = SpreadsheetApp.openById(CONCILIATION_SHEET_ID);
+  const targetSheet = spreadsheet.getSheets()[0];
 
   // ── 1. SINCRONIZAR FILAS NUEVAS DESDE MERCURY ───────────────────────────────
   let currentData = targetSheet.getLastRow() > 0 ? targetSheet.getDataRange().getValues() : [];
