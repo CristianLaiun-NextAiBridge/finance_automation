@@ -83,47 +83,69 @@ function obtenerTokenDeAcceso(sa) {
   return JSON.parse(resp.getContentText()).access_token;
 }
 
+// Transacciones internas de Mercury que nunca tienen comprobante físico
+const TX_SIN_COMPROBANTE = [
+  'mercury', 'cashback', 'io autopay', 'autopay', 'bank reward', 'checking •'
+];
+
+// Filtra candidatos con criterios estrictos y devuelve máximo 3, ordenados por score.
+// Requisitos excluyentes: monto Y fecha deben coincidir.
+// La similitud de proveedor suma puntos pero no es obligatoria.
 function preFiltrarCandidatosAmplio(txAmount, txDate, txDesc, jsonFiles) {
-  const candidatos    = [];
+  const txDescLower = txDesc.toLowerCase();
+
+  // Saltar transacciones internas de Mercury
+  if (TX_SIN_COMPROBANTE.some(function(p) { return txDescLower.includes(p); })) return [];
+
   const fechaBanco    = new Date(txDate);
-  const txDescLower   = txDesc.toLowerCase();
-  const palabrasClave = txDescLower.replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(w => w.length > 1);
+  const palabrasClave = txDescLower.replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(function(w) { return w.length > 2; });
+  const scored        = [];
 
   for (let i = 0; i < jsonFiles.length; i++) {
-    const json     = jsonFiles[i];
+    const json = jsonFiles[i];
+    let score  = 0;
+
+    // 1. MONTO — requerido. Primero intenta datos estructurados (más rápido)
+    let montoMatch = false;
+    if (json.data && json.data.total) {
+      montoMatch = Math.abs(parseFloat(json.data.total.toString().replace(/,/g, ''))) === txAmount;
+    }
+    if (!montoMatch) {
+      const s = json.contentStr.toLowerCase();
+      const a = txAmount.toString();
+      montoMatch = s.includes(a) || s.includes(a.replace('.', ','));
+    }
+    if (!montoMatch) continue;
+    score += 3;
+
+    // 2. FECHA — requerida, ventana -5 a +25 días
+    const fechaDoc = _parseFechaJSON(json.data && json.data.fecha);
+    if (!fechaDoc) continue;
+    const diasDif = (fechaBanco - fechaDoc) / 86400000;
+    if (diasDif < -5 || diasDif > 25) continue;
+    score += diasDif <= 7 ? 3 : (diasDif <= 14 ? 2 : 1);
+
+    // 3. PROVEEDOR — opcional, suma puntos
     const strLower = json.contentStr.toLowerCase();
+    score += palabrasClave.filter(function(p) { return strLower.includes(p); }).length * 2;
 
-    const amountStr       = txAmount.toString();
-    const amountWithComma = amountStr.replace('.', ',');
-    let montoAparece      = strLower.includes(amountStr) || strLower.includes(amountWithComma);
-
-    if (!montoAparece && json.data && json.data.total) {
-      const cleanTotal = json.data.total.toString().replace(/,/g, '');
-      montoAparece     = Math.abs(parseFloat(cleanTotal)) === txAmount;
-    }
-    if (!montoAparece) continue;
-
-    let fechaAceptable = false;
-    if (json.data && json.data.fecha) {
-      const fechaComprobante = new Date(json.data.fecha);
-      if (!isNaN(fechaComprobante.getTime())) {
-        const diff = (fechaBanco - fechaComprobante) / (1000 * 60 * 60 * 24);
-        if (diff >= -5 && diff <= 20) fechaAceptable = true;
-      } else {
-        const fStr = json.data.fecha.toString().replace(/[^0-9]/g, '');
-        if (fStr.length === 8) {
-          const fComp = new Date(fStr.substring(0,4), parseInt(fStr.substring(4,6))-1, fStr.substring(6,8));
-          const diff  = (fechaBanco - fComp) / (1000 * 60 * 60 * 24);
-          if (diff >= -5 && diff <= 20) fechaAceptable = true;
-        }
-      }
-    }
-
-    const proveedorCoincide = palabrasClave.some(p => strLower.includes(p));
-    if (fechaAceptable || proveedorCoincide) candidatos.push(json);
+    scored.push({ json: json, score: score });
   }
 
-  return candidatos;
+  // Top 3 candidatos por score
+  scored.sort(function(a, b) { return b.score - a.score; });
+  return scored.slice(0, 3).map(function(c) { return c.json; });
+}
+
+function _parseFechaJSON(fechaStr) {
+  if (!fechaStr) return null;
+  const d = new Date(fechaStr);
+  if (!isNaN(d.getTime())) return d;
+  const s = fechaStr.toString().replace(/[^0-9]/g, '');
+  if (s.length === 8) {
+    return new Date(s.substring(0,4), parseInt(s.substring(4,6)) - 1, s.substring(6,8));
+  }
+  return null;
 }
 
 // Ejecuta llamadas a Vertex AI en lotes de tamaño seguro y devuelve las respuestas
