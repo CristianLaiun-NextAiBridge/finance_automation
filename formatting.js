@@ -169,6 +169,34 @@ function formatearHoja() {
   ledger.setFrozenRows(1);
   if (!ledger.getFilter()) headerRange.createFilter();
 
+  // Anchos de columna
+  const colWidths = {
+    'Checked':          55,
+    'Date':            105,
+    'Description':     420,
+    'Category':        210,
+    'Comments':        180,
+    'Amount In (+)':   115,
+    'Amount Out (-)':  115,
+    'Account balance': 130,
+    'Receipt':          75,
+    'JSON Data':        75
+  };
+  Object.keys(colWidths).forEach(function(col) {
+    const idx = ledgerHeaders.indexOf(col) + 1;
+    if (idx > 0) ledger.setColumnWidth(idx, colWidths[col]);
+  });
+
+  // Alternating row colors (banding): blanco / gris clarito
+  const bandingRange = ledger.getRange(1, 1, ledger.getMaxRows(), lastCol);
+  // Quitar bandings previos para no duplicar
+  bandingRange.getBandings().forEach(function(b) { b.remove(); });
+  bandingRange.applyRowBanding(SpreadsheetApp.BandingTheme.LIGHT_GREY)
+    .setHeaderRowColor('#4a86e8')
+    .setFirstRowColor('#ffffff')
+    .setSecondRowColor('#f3f3f3')
+    .setFooterRowColor(null);
+
   // Formato de dinero con 1 decimal en columnas de montos
   if (lastRow > 1) {
     const moneyFormat = '$#,##0.0';
