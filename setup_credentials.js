@@ -15,12 +15,16 @@ function setupCredentials() {
   const props = PropertiesService.getScriptProperties();
 
   props.setProperties({
-    // Reemplazá estos valores con los del JSON de tu Service Account:
+    // --- Service Account (Vertex AI / Gemini) ---
     'SA_PROJECT_ID':   'REEMPLAZAR_CON_project_id',
     'SA_CLIENT_EMAIL': 'REEMPLAZAR_CON_client_email',
 
     // Pegá la private_key completa incluyendo los saltos de línea (\n):
-    'SA_PRIVATE_KEY':  '-----BEGIN PRIVATE KEY-----\nREEMPLAZAR_CON_private_key\n-----END PRIVATE KEY-----\n'
+    'SA_PRIVATE_KEY':  '-----BEGIN PRIVATE KEY-----\nREEMPLAZAR_CON_private_key\n-----END PRIVATE KEY-----\n',
+
+    // --- Mercury API ---
+    // Token "Read Only" de Mercury (Settings > API Tokens)
+    'MERCURY_API_TOKEN': 'REEMPLAZAR_CON_mercury_api_token'
   });
 
   Logger.log('✅ Credenciales guardadas en Script Properties correctamente.');
@@ -33,9 +37,12 @@ function verifyCredentials() {
   const email     = props.getProperty('SA_CLIENT_EMAIL');
   const key       = props.getProperty('SA_PRIVATE_KEY');
 
-  Logger.log('SA_PROJECT_ID:   ' + (projectId   ? '✅ ' + projectId                       : '❌ No configurado'));
-  Logger.log('SA_CLIENT_EMAIL: ' + (email        ? '✅ ' + email                           : '❌ No configurado'));
-  Logger.log('SA_PRIVATE_KEY:  ' + (key          ? '✅ Cargada (' + key.length + ' chars)' : '❌ No configurada'));
+  const mercury  = props.getProperty('MERCURY_API_TOKEN');
+
+  Logger.log('SA_PROJECT_ID:      ' + (projectId ? '✅ ' + projectId                       : '❌ No configurado'));
+  Logger.log('SA_CLIENT_EMAIL:    ' + (email      ? '✅ ' + email                           : '❌ No configurado'));
+  Logger.log('SA_PRIVATE_KEY:     ' + (key        ? '✅ Cargada (' + key.length + ' chars)' : '❌ No configurada'));
+  Logger.log('MERCURY_API_TOKEN:  ' + (mercury    ? '✅ Cargado  (' + mercury.length + ' chars)' : '❌ No configurado'));
 }
 
 function clearCredentials() {
