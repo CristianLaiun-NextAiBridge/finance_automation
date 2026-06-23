@@ -127,50 +127,75 @@ function formatearHoja() {
   const categorias = _leerCategorias(spreadsheet);
 
   if (categorias.length > 0) {
+    Logger.log("📋 Categorías encontradas: " + categorias.join(', '));
     const sa    = getServiceAccount();
     const token = obtenerTokenDeAcceso(sa);
-    _asignarCategorias(targetSheet, headers, assignedCategoryCol, categorias, sa, token);
+    _asignarCategoriasIA(targetSheet, headers, assignedCategoryCol, categorias, sa, token);
   } else {
     Logger.log("⚠️ No se encontraron categorías en la hoja 'asigned_category'. Se omite asignación.");
   }
 
   // ── 4. FORMATO VISUAL ────────────────────────────────────────────────────────
-  const lastCol    = targetSheet.getLastColumn();
+  const lastCol     = targetSheet.getLastColumn();
   const headerRange = targetSheet.getRange(1, 1, 1, lastCol);
 
   headerRange.setBackground("#4a86e8").setFontColor("#ffffff").setFontWeight("bold");
   targetSheet.setFrozenRows(1);
   if (!targetSheet.getFilter()) headerRange.createFilter();
 
-  const columnasAOcultar = [
-    'Bank Description', 'Reference', 'Note', 'Category', 'Source of Category',
-    'Source of Categ', 'attachments', 'Timestamp', 'Date (UTC)', 'dashboardLink', 'postedAt'
-  ];
-  columnasAOcultar.forEach(function(colName) {
-    const idx = headers.indexOf(colName);
-    if (idx !== -1) targetSheet.hideColumns(idx + 1);
-  });
-
   Logger.log("✅ Formateo completado.");
 }
 
-// ── HELPERS INTERNOS ──────────────────────────────────────────────────────────
+// ── FUNCIÓN STANDALONE: se puede ejecutar sola o es llamada por formatearHoja() ──
 
-function _leerCategorias(spreadsheet) {
-  try {
-    const catSheet = spreadsheet.getSheetByName('asigned_category');
-    if (!catSheet) return [];
-    const valores  = catSheet.getRange(1, 1, catSheet.getLastRow(), 1).getValues();
-    // Si la primera fila parece un header, la saltamos
-    const inicio   = (valores[0] && valores[0][0].toString().toLowerCase().includes('categ')) ? 1 : 0;
-    return valores.slice(inicio).map(function(r) { return r[0].toString().trim(); }).filter(Boolean);
-  } catch(e) {
-    Logger.log("⚠️ Error leyendo hoja 'asigned_category': " + e.toString());
-    return [];
+// Asigna la categoría correcta a cada transacción usando IA.
+// Lee la lista de categorías desde la hoja "asigned_category" del spreadsheet
+// de conciliación. Solo procesa filas con la celda assigned_category vacía.
+function asignarCategorias() {
+  const spreadsheet     = SpreadsheetApp.openById(CONCILIATION_SHEET_ID);
+  const targetSheet     = spreadsheet.getSheets()[0];
+  const headers         = targetSheet.getRange(1, 1, 1, targetSheet.getLastColumn()).getValues()[0];
+  const assignedCatCol  = headers.indexOf('assigned_category') + 1;
+
+  if (assignedCatCol === 0) {
+    Logger.log("❌ No existe la columna 'assigned_category'. Ejecutá formatearHoja() primero.");
+    return;
   }
+
+  const categorias = _leerCategorias(spreadsheet);
+  if (categorias.length === 0) {
+    Logger.log("❌ No se encontraron categorías. Verificá que exista la hoja 'asigned_category' con categorías en la columna A.");
+    return;
+  }
+
+  Logger.log("📋 Categorías encontradas: " + categorias.join(', '));
+
+  const sa    = getServiceAccount();
+  const token = obtenerTokenDeAcceso(sa);
+  _asignarCategoriasIA(targetSheet, headers, assignedCatCol, categorias, sa, token);
 }
 
-function _asignarCategorias(sheet, headers, assignedCategoryCol, categorias, sa, token) {
+// ── HELPERS INTERNOS ─────────────────────────────────────────────────────────
+
+function _leerCategorias(spreadsheet) {
+  // Busca la hoja con nombre exacto o insensible a mayúsculas
+  const sheets   = spreadsheet.getSheets();
+  const catSheet = sheets.find(function(s) {
+    return s.getName().toLowerCase().replace(/\s/g,'') === 'asigned_category';
+  });
+
+  if (!catSheet) {
+    Logger.log("⚠️ Hojas disponibles: " + sheets.map(function(s) { return s.getName(); }).join(', '));
+    return [];
+  }
+
+  const valores = catSheet.getRange(1, 1, catSheet.getLastRow(), 1).getValues();
+  // Saltamos la primera fila si parece un header
+  const inicio  = (valores[0] && valores[0][0].toString().toLowerCase().includes('categ')) ? 1 : 0;
+  return valores.slice(inicio).map(function(r) { return r[0].toString().trim(); }).filter(Boolean);
+}
+
+function _asignarCategoriasIA(sheet, headers, assignedCategoryCol, categorias, sa, token) {
   const lastRow   = sheet.getLastRow();
   if (lastRow < 2) return;
 
@@ -179,7 +204,8 @@ function _asignarCategorias(sheet, headers, assignedCategoryCol, categorias, sa,
   let   dateIdx   = headers.indexOf('Timestamp');
   if (dateIdx === -1) dateIdx = headers.indexOf('Date (UTC)');
 
-  const dataRango  = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
+  const totalCols  = sheet.getLastColumn();
+  const dataRango  = sheet.getRange(2, 1, lastRow - 1, totalCols).getValues();
   const catRango   = sheet.getRange(2, assignedCategoryCol, lastRow - 1, 1).getValues();
   const listaTexto = categorias.join('\n- ');
 
@@ -199,9 +225,9 @@ function _asignarCategorias(sheet, headers, assignedCategoryCol, categorias, sa,
     peticiones.push({
       prompt: 'Eres un contador que clasifica transacciones bancarias corporativas.\n\n' +
               'Transacción:\n' +
-              '- Fecha: ' + date + '\n' +
-              '- Monto: $' + amount + '\n' +
-              '- Descripción: ' + desc + '\n\n' +
+              '- Fecha: '       + date   + '\n' +
+              '- Monto: $'      + amount + '\n' +
+              '- Descripción: ' + desc   + '\n\n' +
               'Categorías disponibles:\n- ' + listaTexto + '\n\n' +
               'Asigná la categoría más apropiada.\n' +
               'Respondé ÚNICAMENTE con el nombre exacto de la categoría, sin explicación ni puntuación.'
@@ -222,9 +248,10 @@ function _asignarCategorias(sheet, headers, assignedCategoryCol, categorias, sa,
     try {
       const texto = JSON.parse(respuestas[k].getContentText())
                       .candidates[0].content.parts[0].text.trim();
-      // Solo escribir si la respuesta coincide con alguna categoría conocida
+      // Preferir coincidencia exacta (case-insensitive); si no hay, escribir igual lo que devolvió la IA
       const match = categorias.find(function(c) { return c.toLowerCase() === texto.toLowerCase(); });
       sheet.getRange(mapeo[k], assignedCategoryCol).setValue(match || texto);
+      Logger.log("🏷️ Fila " + mapeo[k] + " → " + (match || texto));
     } catch(e) {
       Logger.log("⚠️ Error procesando categoría fila " + mapeo[k] + ": " + e.toString());
     }
