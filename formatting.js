@@ -41,16 +41,16 @@ function formatearHoja() {
   const srcData    = mercuryTab.getDataRange().getValues();
   const srcHeaders = srcData[0];
 
-  // Índices en la pestaña mercury
+  // Índices en la pestaña mercury — usar los nombres originales de esa pestaña
   const SI = {
     id:          srcHeaders.indexOf('id'),
-    date:        srcHeaders.indexOf('Date'),
+    date:        srcHeaders.indexOf('Date (UTC)'),
     description: srcHeaders.indexOf('Description'),
     bankDesc:    srcHeaders.indexOf('Bank Description'),
     reference:   srcHeaders.indexOf('Reference'),
     note:        srcHeaders.indexOf('Note'),
     amount:      srcHeaders.indexOf('Amount'),
-    balance:     srcHeaders.indexOf('Account balance')
+    balance:     srcHeaders.indexOf('Balance')
   };
 
   // ── 1. INICIALIZAR HEADERS DEL LEDGER SI ESTÁ VACÍO ─────────────────────────
